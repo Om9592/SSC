@@ -49,7 +49,8 @@ import {
   CheckSquare,
   AlertCircle,
   Loader2,
-  Scan
+  Scan,
+  Youtube
 } from 'lucide-react';
 
 // --- CONFIGURATION ---
@@ -944,6 +945,16 @@ const FocusMode = ({ user, scheduleRef, todaySchedule, setView, userData, userRe
   const [timeLeft, setTimeLeft] = useState(currentTask ? currentTask.duration_min * 60 : 25 * 60);
   const [isActive, setIsActive] = useState(false);
   const [breaches, setBreaches] = useState(0);
+  const [youtubeLink, setYoutubeLink] = useState("");
+  const [embeddedVideo, setEmbeddedVideo] = useState(null);
+
+  const getYoutubeId = (url) => {
+    if (!url) return null;
+    // Supports: Standard, Shorts, Live, Embed, Mobile, Short-URL
+    const regExp = /^(?:https?:\/\/)?(?:www\.|m\.)?(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=|shorts\/|live\/))([\w-]{11})(?:[?&].*)?$/;
+    const match = url.trim().match(regExp);
+    return match ? match[1] : null;
+  };
 
   useEffect(() => {
     let interval = null;
@@ -971,6 +982,16 @@ const FocusMode = ({ user, scheduleRef, todaySchedule, setView, userData, userRe
 
   const toggleTimer = () => {
     if (!currentTask) return;
+    
+    if (!isActive && youtubeLink.trim()) {
+      const id = getYoutubeId(youtubeLink);
+      if (id) {
+        setEmbeddedVideo(id);
+      } else {
+        alert("Invalid YouTube Link. Please paste a valid URL.");
+        return;
+      }
+    }
     setIsActive(!isActive);
   };
 
@@ -1054,11 +1075,48 @@ const FocusMode = ({ user, scheduleRef, todaySchedule, setView, userData, userRe
           <p className="text-slate-500 text-sm">{currentTask.type}</p>
         </div>
 
-        <div className="relative z-10 mb-12">
-          <div className="text-8xl font-black font-mono tracking-tighter text-white tabular-nums">
-            {minutes.toString().padStart(2, '0')}:{seconds.toString().padStart(2, '0')}
+        {isActive && embeddedVideo ? (
+          <div className="w-full max-w-4xl flex flex-col items-center z-20">
+            <div className="w-full aspect-video bg-black rounded-xl overflow-hidden border border-slate-800 shadow-2xl ring-1 ring-emerald-500/50 mb-4">
+              <iframe 
+                width="100%" 
+                height="100%" 
+                src={`https://www.youtube.com/embed/${embeddedVideo}?autoplay=1&controls=1&rel=0&modestbranding=1`} 
+                title="YouTube Focus Mode" 
+                frameBorder="0" 
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" 
+                allowFullScreen
+              ></iframe>
+            </div>
+            <div className="text-3xl font-black font-mono text-emerald-500 tabular-nums bg-slate-900/80 px-4 py-2 rounded-lg backdrop-blur">
+              {minutes.toString().padStart(2, '0')}:{seconds.toString().padStart(2, '0')}
+            </div>
           </div>
-        </div>
+        ) : (
+          <div className="relative z-10 mb-12">
+            <div className="text-8xl font-black font-mono tracking-tighter text-white tabular-nums">
+              {minutes.toString().padStart(2, '0')}:{seconds.toString().padStart(2, '0')}
+            </div>
+          </div>
+        )}
+
+        {!isActive && (
+          <div className="mb-8 w-full max-w-xs relative z-20">
+            <div className="relative group">
+              <Youtube className="absolute left-3 top-3 w-4 h-4 text-slate-500 group-focus-within:text-red-500 transition-colors" />
+              <input 
+                type="text" 
+                placeholder="Paste YouTube Link to Lock Focus"
+                className="w-full bg-slate-900 border border-slate-800 rounded-lg py-2 pl-10 pr-4 text-sm text-white focus:border-red-500 outline-none transition-colors placeholder:text-slate-600"
+                value={youtubeLink}
+                onChange={(e) => setYoutubeLink(e.target.value)}
+              />
+            </div>
+            <p className="text-[10px] text-slate-600 mt-2 text-center">
+              Paste a link to watch ONLY that video. <br/>Switching tabs will penalize score.
+            </p>
+          </div>
+        )}
 
         <div className="flex gap-4 z-10">
           <button 
