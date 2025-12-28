@@ -332,9 +332,10 @@ const Dashboard = ({ user }) => {
 const LibraryView = ({ user, setView, setActiveTest }) => {
   const [materials, setMaterials] = useState([]);
   const [isAdding, setIsAdding] = useState(false);
-  const [newMaterial, setNewMaterial] = useState({ title: '', content: '', type: 'text' });
+  const [newMaterial, setNewMaterial] = useState({ title: '', content: '', type: 'text', instruction: '' });
   const [generatingTest, setGeneratingTest] = useState(null); 
   const [aiStatus, setAiStatus] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
   const fileInputRef = useRef(null);
 
   useEffect(() => {
@@ -346,14 +347,30 @@ const LibraryView = ({ user, setView, setActiveTest }) => {
   }, [user]);
 
   const handleAdd = async () => {
-    if(!newMaterial.title) return;
-    await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'materials'), {
-      ...newMaterial,
-      timestamp: new Date().toISOString(),
-      status: 'active'
-    });
-    setIsAdding(false);
-    setNewMaterial({ title: '', content: '', type: 'text' });
+    if (!newMaterial.title.trim()) {
+      alert("Please enter a Title/Topic Name.");
+      return;
+    }
+    if (newMaterial.type === 'text' && !newMaterial.content.trim()) {
+      alert("Please paste text content.");
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'materials'), {
+        ...newMaterial,
+        timestamp: new Date().toISOString(),
+        status: 'active'
+      });
+      setIsAdding(false);
+      setNewMaterial({ title: '', content: '', type: 'text', instruction: '' });
+    } catch (error) {
+      console.error("Error saving material:", error);
+      alert("Failed to save material.");
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const handleFileSelect = (e) => {
@@ -386,12 +403,16 @@ const LibraryView = ({ user, setView, setActiveTest }) => {
     if (isSimulation) {
       contextPrompt = `The user uploaded a file named "${material.title}". Since I cannot read local files directly, assume the content matches the title. Generate a relevant, tough SSC CGL level mock test based on the topic implied by the filename "${material.title}".`;
     } else {
-      contextPrompt = `Create a tough mock test from this material text: Title: ${material.title}. Content Summary: ${material.content.substring(0, 1000)}...`;
+      contextPrompt = `Analyze the ENTIRE text provided below and create a comprehensive mock test. Do not limit questions to the beginning. Ensure questions cover the start, middle, and end of the content.\n\nTitle: ${material.title}\n\nFull Content:\n${material.content.substring(0, 20000)}`;
     }
     
+    if (material.instruction) {
+      contextPrompt += `\n\nIMPORTANT USER INSTRUCTION: ${material.instruction}\nFollow this instruction strictly while generating questions.`;
+    }
+
     const systemPrompt = `You are an Exam Setter for SSC CGL. 
     Task: Generate a JSON object with a "questions" array.
-    Create 10 Multiple Choice Questions based on the User's Topic/Material.
+    Create 10 Multiple Choice Questions based on the User's Topic/Material. Ensure questions are distributed evenly across the entire content provided.
     Each question object must have: id (1-10), question, options (array of 4 strings), correctIndex (0-3).
     IMPORTANT: Return Strictly Valid JSON. Escape all backslashes in math formulas (e.g. use \\\\theta instead of \\theta).`;
 
@@ -503,9 +524,23 @@ const LibraryView = ({ user, setView, setActiveTest }) => {
             </div>
           )}
 
+          <textarea 
+            placeholder="Optional: Instructions for AI (e.g. 'Focus on formulas', 'Make it extremely hard')..."
+            className="w-full bg-slate-950 border border-slate-800 rounded p-2 text-sm h-16 focus:border-emerald-500 outline-none transition-colors"
+            value={newMaterial.instruction || ''}
+            onChange={e => setNewMaterial({...newMaterial, instruction: e.target.value})}
+          />
+
           <div className="flex justify-end gap-2 mt-2">
             <button onClick={() => setIsAdding(false)} className="px-3 py-1 text-xs text-slate-400 hover:text-white">Cancel</button>
-            <button onClick={handleAdd} className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs rounded font-bold">Save to Memory</button>
+            <button 
+              onClick={handleAdd} 
+              disabled={isSaving}
+              className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs rounded font-bold flex items-center gap-2"
+            >
+              {isSaving && <Loader2 className="w-3 h-3 animate-spin" />}
+              {isSaving ? 'Saving...' : 'Save to Memory'}
+            </button>
           </div>
         </div>
       )}
