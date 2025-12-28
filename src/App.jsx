@@ -224,6 +224,7 @@ const Dashboard = ({ user }) => {
   const [todaySchedule, setTodaySchedule] = useState(null);
   const [activeTest, setActiveTest] = useState(null); 
   const [loading, setLoading] = useState(true);
+  const [activeVideo, setActiveVideo] = useState(null);
 
   // Firestore Refs
   const userRef = doc(db, 'artifacts', appId, 'users', user.uid, 'profile', 'main');
@@ -265,9 +266,9 @@ const Dashboard = ({ user }) => {
     switch(view) {
       case 'dashboard': return <HomeView user={user} userData={userData} todaySchedule={todaySchedule} setView={setView} scheduleRef={scheduleRef} />;
       case 'library': return <LibraryView user={user} setView={setView} setActiveTest={setActiveTest} />;
-      case 'focus': return <FocusMode user={user} scheduleRef={scheduleRef} todaySchedule={todaySchedule} setView={setView} userData={userData} userRef={userRef} />;
+      case 'focus': return <FocusMode user={user} scheduleRef={scheduleRef} todaySchedule={todaySchedule} setView={setView} userData={userData} userRef={userRef} activeVideo={activeVideo} setActiveVideo={setActiveVideo} />;
       case 'test': return <TestMode user={user} activeTest={activeTest} setView={setView} userRef={userRef} />;
-      case 'analysis': return <AnalysisView user={user} userData={userData} />;
+      case 'analysis': return <AnalysisView user={user} userData={userData} setView={setView} setActiveVideo={setActiveVideo} />;
       default: return <HomeView user={user} userData={userData} todaySchedule={todaySchedule} setView={setView} scheduleRef={scheduleRef} />;
     }
   };
@@ -937,16 +938,32 @@ const HomeView = ({ user, userData, todaySchedule, setView, scheduleRef }) => {
 };
 
 // --- VIEW: FOCUS MODE (THE DISCIPLINE ENGINE) ---
-const FocusMode = ({ user, scheduleRef, todaySchedule, setView, userData, userRef }) => {
+const FocusMode = ({ user, scheduleRef, todaySchedule, setView, userData, userRef, activeVideo, setActiveVideo }) => {
   const blocks = todaySchedule?.blocks || [];
   const currentTaskIndex = blocks.findIndex(b => b.status === 'pending');
-  const currentTask = currentTaskIndex !== -1 ? blocks[currentTaskIndex] : null;
+  let currentTask = currentTaskIndex !== -1 ? blocks[currentTaskIndex] : null;
+
+  if (activeVideo) {
+    currentTask = {
+      title: activeVideo.title || "Video Revision",
+      duration_min: 30,
+      type: "Revision",
+      isAdHoc: true
+    };
+  }
 
   const [timeLeft, setTimeLeft] = useState(currentTask ? currentTask.duration_min * 60 : 25 * 60);
   const [isActive, setIsActive] = useState(false);
   const [breaches, setBreaches] = useState(0);
-  const [youtubeLink, setYoutubeLink] = useState("");
-  const [embeddedVideo, setEmbeddedVideo] = useState(null);
+  const [youtubeLink, setYoutubeLink] = useState(activeVideo?.url || "");
+  const [embeddedVideo, setEmbeddedVideo] = useState(activeVideo?.id || null);
+
+  useEffect(() => {
+    if (activeVideo) {
+      setYoutubeLink(activeVideo.url || "");
+      setEmbeddedVideo(activeVideo.id || null);
+    }
+  }, [activeVideo]);
 
   const getYoutubeId = (url) => {
     if (!url) return null;
@@ -997,27 +1014,45 @@ const FocusMode = ({ user, scheduleRef, todaySchedule, setView, userData, userRe
 
   const completeSession = async () => {
     if (!currentTask) return;
-    const newBlocks = [...blocks];
-    newBlocks[currentTaskIndex].status = 'completed';
-    await updateDoc(scheduleRef, {
-      blocks: newBlocks,
-      totalMinutesDone: increment(currentTask.duration_min)
-    });
+    
+    // Calculate actual time spent (in case of early finish)
+    const totalSeconds = currentTask.duration_min * 60;
+    const spentSeconds = totalSeconds - timeLeft;
+    const spentMinutes = Math.max(1, Math.floor(spentSeconds / 60));
+
+    // SAFETY CHECK: Ensure video ID is captured even if state was slightly off
+    let finalVideoId = embeddedVideo;
+    if (!finalVideoId && youtubeLink) {
+        finalVideoId = getYoutubeId(youtubeLink);
+    }
+
+    if (!currentTask.isAdHoc) {
+      const newBlocks = [...blocks];
+      newBlocks[currentTaskIndex].status = 'completed';
+      await updateDoc(scheduleRef, {
+        blocks: newBlocks,
+        totalMinutesDone: increment(spentMinutes)
+      });
+    }
+
     if (breaches === 0) {
       await updateDoc(userRef, { disciplineScore: increment(1) });
     }
     const sessionRef = doc(collection(db, 'artifacts', appId, 'users', user.uid, 'sessions'));
     await setDoc(sessionRef, {
       task: currentTask.title,
-      duration: currentTask.duration_min,
+      duration: spentMinutes,
       breaches: breaches,
       timestamp: new Date().toISOString(),
-      type: currentTask.type
+      type: currentTask.type,
+      videoId: finalVideoId || null,
+      videoUrl: youtubeLink || null 
     });
+    if (setActiveVideo) setActiveVideo(null);
     setView('dashboard');
   };
 
-  if (!todaySchedule || blocks.length === 0) {
+  if ((!todaySchedule || blocks.length === 0) && !activeVideo) {
     return (
       <div className="h-full flex flex-col items-center justify-center p-8 text-center space-y-4 bg-black">
         <AlertTriangle className="w-16 h-16 text-yellow-500" />
@@ -1028,7 +1063,7 @@ const FocusMode = ({ user, scheduleRef, todaySchedule, setView, userData, userRe
     );
   }
 
-  if (!currentTask) {
+  if (!currentTask && !activeVideo) {
     return (
       <div className="h-full flex flex-col items-center justify-center p-8 text-center space-y-4">
         <CheckCircle className="w-16 h-16 text-emerald-500" />
@@ -1042,10 +1077,13 @@ const FocusMode = ({ user, scheduleRef, todaySchedule, setView, userData, userRe
   const seconds = timeLeft % 60;
 
   return (
-    <div className="h-full flex flex-col bg-black min-h-screen fixed inset-0 z-50">
+    <div className="fixed inset-0 z-50 bg-black overflow-y-auto">
       <button 
-        onClick={() => setView('dashboard')}
-        className="absolute top-5 left-5 z-50 text-slate-500 hover:text-white p-2 bg-slate-900/50 rounded-full backdrop-blur-sm transition-all hover:bg-slate-800"
+        onClick={() => {
+          if (setActiveVideo) setActiveVideo(null);
+          setView('dashboard');
+        }}
+        className="fixed top-5 left-5 z-50 text-slate-500 hover:text-white p-2 bg-slate-900/50 rounded-full backdrop-blur-sm transition-all hover:bg-slate-800"
       >
         <ArrowLeft className="w-6 h-6" />
       </button>
@@ -1058,7 +1096,7 @@ const FocusMode = ({ user, scheduleRef, todaySchedule, setView, userData, userRe
         </div>
       )}
 
-      <div className="flex-1 flex flex-col items-center justify-center p-8 relative">
+      <div className="min-h-screen flex flex-col items-center justify-center p-4 py-20 relative">
         {isActive && (
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
             <div className="w-64 h-64 bg-emerald-500/5 rounded-full animate-ping" />
@@ -1077,7 +1115,7 @@ const FocusMode = ({ user, scheduleRef, todaySchedule, setView, userData, userRe
 
         {isActive && embeddedVideo ? (
           <div className="w-full max-w-4xl flex flex-col items-center z-20">
-            <div className="w-full aspect-video bg-black rounded-xl overflow-hidden border border-slate-800 shadow-2xl ring-1 ring-emerald-500/50 mb-4">
+            <div className="w-full aspect-video max-h-[50vh] bg-black rounded-xl overflow-hidden border border-slate-800 shadow-2xl ring-1 ring-emerald-500/50 mb-4">
               <iframe 
                 width="100%" 
                 height="100%" 
@@ -1100,7 +1138,7 @@ const FocusMode = ({ user, scheduleRef, todaySchedule, setView, userData, userRe
           </div>
         )}
 
-        {!isActive && (
+        {!isActive && !activeVideo && (
           <div className="mb-8 w-full max-w-xs relative z-20">
             <div className="relative group">
               <Youtube className="absolute left-3 top-3 w-4 h-4 text-slate-500 group-focus-within:text-red-500 transition-colors" />
@@ -1118,6 +1156,13 @@ const FocusMode = ({ user, scheduleRef, todaySchedule, setView, userData, userRe
           </div>
         )}
 
+        {!isActive && activeVideo && (
+          <div className="mb-8 text-center relative z-20 bg-emerald-950/30 border border-emerald-900/50 px-6 py-3 rounded-xl">
+            <p className="text-emerald-400 text-sm font-bold flex items-center gap-2 justify-center"><CheckCircle className="w-4 h-4" /> Video Loaded</p>
+            <p className="text-[10px] text-slate-500 mt-1">Press Zap to Start Rewatching</p>
+          </div>
+        )}
+
         <div className="flex gap-4 z-10">
           <button 
             onClick={toggleTimer}
@@ -1130,6 +1175,16 @@ const FocusMode = ({ user, scheduleRef, todaySchedule, setView, userData, userRe
             {isActive ? <Lock className="w-8 h-8" /> : <Zap className="w-8 h-8" />}
           </button>
         </div>
+
+        {!isActive && timeLeft !== (currentTask.duration_min * 60) && (
+          <button 
+            onClick={completeSession}
+            className="mt-8 text-xs text-slate-400 hover:text-white border border-slate-800 hover:border-emerald-500 px-6 py-2 rounded-full transition-all flex items-center gap-2 group"
+          >
+            <CheckCircle className="w-4 h-4 text-slate-600 group-hover:text-emerald-500" />
+            Finish & Save Session
+          </button>
+        )}
         
         <p className="mt-8 text-slate-600 text-xs max-w-[200px] text-center">
           {isActive ? "Do not leave this screen. The AI is watching your focus." : "Timer Paused. Discipline mode active."}
@@ -1140,9 +1195,22 @@ const FocusMode = ({ user, scheduleRef, todaySchedule, setView, userData, userRe
 };
 
 // --- VIEW: ANALYSIS ---
-const AnalysisView = ({ user, userData }) => {
+const AnalysisView = ({ user, userData, setView, setActiveVideo }) => {
   const [analysis, setAnalysis] = useState("");
   const [loading, setLoading] = useState(false);
+  const [history, setHistory] = useState([]);
+
+  useEffect(() => {
+    const q = query(
+      collection(db, 'artifacts', appId, 'users', user.uid, 'sessions'), 
+      orderBy('timestamp', 'desc'), 
+      limit(10)
+    );
+    const unsub = onSnapshot(q, (snap) => {
+      setHistory(snap.docs.map(d => d.data()));
+    });
+    return () => unsub();
+  }, [user]);
 
   const runDeepAnalysis = async () => {
     setLoading(true);
@@ -1155,6 +1223,11 @@ const AnalysisView = ({ user, userData }) => {
     const result = await generateAIResponse("Analyze my performance.", systemPrompt);
     setAnalysis(result);
     setLoading(false);
+  };
+
+  const handleRewatch = (session) => {
+    setActiveVideo({ id: session.videoId, url: session.videoUrl, title: session.task });
+    setView('focus');
   };
 
   return (
@@ -1188,6 +1261,42 @@ const AnalysisView = ({ user, userData }) => {
       <div className="grid grid-cols-2 gap-4">
         <StatCard label="Discipline" value={`${userData?.disciplineScore}%`} sub="Target: 95%" color="emerald" />
         <StatCard label="Total Hrs" value={`${Math.round((userData?.totalHoursStudied || 0) * 10) / 10}`} sub="Lifetime" color="blue" />
+      </div>
+
+      <div className="space-y-3 pt-4 border-t border-slate-800">
+        <h3 className="font-bold text-slate-400 text-xs uppercase tracking-widest flex items-center gap-2">
+          <Clock className="w-3 h-3" /> Session History
+        </h3>
+        <div className="space-y-2">
+          {history.length === 0 ? (
+            <p className="text-slate-500 text-xs italic">No sessions recorded yet.</p>
+          ) : (
+            history.map((session, idx) => (
+              <div key={idx} className="bg-slate-900 border border-slate-800 p-3 rounded-lg flex items-center justify-between group hover:border-slate-700 transition-colors">
+                <div>
+                  <p className="text-sm font-bold text-slate-200 truncate max-w-[200px]">{session.task}</p>
+                  <p className="text-[10px] text-slate-500 flex items-center gap-2">
+                    {new Date(session.timestamp).toLocaleDateString()} • {session.duration} mins
+                    {session.videoId && <span className="text-emerald-500 flex items-center gap-1 bg-emerald-950/30 px-1.5 rounded"><Youtube className="w-3 h-3" /> Watched</span>}
+                  </p>
+                </div>
+                {(session.videoId || session.videoUrl) && (
+                  <div className="flex items-center gap-2">
+                    <img 
+                      src={session.videoId ? `https://img.youtube.com/vi/${session.videoId}/mqdefault.jpg` : "https://via.placeholder.com/120x68/000000/FFFFFF?text=No+Thumb"} 
+                      alt="Thumbnail" 
+                      className="w-16 h-9 object-cover rounded border border-slate-800 opacity-80 hover:opacity-100 cursor-pointer"
+                      onClick={() => handleRewatch(session)}
+                    />
+                    <button onClick={() => handleRewatch(session)} className="p-2 bg-slate-950 rounded-full text-slate-400 hover:text-emerald-500 transition-colors">
+                      <Youtube className="w-4 h-4" />
+                    </button>
+                  </div>
+                )}
+              </div>
+            ))
+          )}
+        </div>
       </div>
     </div>
   );
