@@ -52,7 +52,8 @@ import {
   Loader2,
   Scan,
   Youtube,
-  Trash2
+  Trash2,
+  Languages
 } from 'lucide-react';
 
 // --- CONFIGURATION ---
@@ -418,6 +419,13 @@ const LibraryView = ({ user, setView, setActiveTest }) => {
     Task: Generate a JSON object with a "questions" array.
     Create 10 Multiple Choice Questions based on the User's Topic/Material. Ensure questions are distributed evenly across the entire content provided.
     Each question object must have: id (1-10), question, options (array of 4 strings), correctIndex (0-3).
+    Each question object must have: 
+    - id (1-10)
+    - question_en (English text)
+    - question_hi (Hindi translation)
+    - options_en (array of 4 English strings)
+    - options_hi (array of 4 Hindi strings)
+    - correctIndex (0-3).
     IMPORTANT: Return Strictly Valid JSON. Escape all backslashes in math formulas (e.g. use \\\\theta instead of \\theta).`;
 
     try {
@@ -602,6 +610,7 @@ const TestMode = ({ user, activeTest, setView, userRef }) => {
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [score, setScore] = useState(0);
   const [breaches, setBreaches] = useState(0);
+  const [language, setLanguage] = useState('en');
 
   useEffect(() => {
     if (isSubmitted) return;
@@ -665,11 +674,30 @@ const TestMode = ({ user, activeTest, setView, userRef }) => {
     return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
   };
 
+  const getQuestionText = (q) => {
+    if (language === 'hi' && q.question_hi) return q.question_hi;
+    return q.question_en || q.question;
+  };
+
+  const getOptions = (q) => {
+    if (language === 'hi' && q.options_hi) return q.options_hi;
+    return q.options_en || q.options || [];
+  };
+
   return (
     <div className="flex flex-col h-screen bg-slate-950">
       <div className="h-14 bg-slate-900 border-b border-slate-800 flex items-center justify-between px-4">
         <h1 className="font-bold text-slate-200 truncate max-w-[50%]">{activeTest.title}</h1>
         <div className="flex items-center gap-4">
+          {!isSubmitted && (
+            <button 
+              onClick={() => setLanguage(l => l === 'en' ? 'hi' : 'en')}
+              className="flex items-center gap-2 px-3 py-1 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded text-xs font-bold text-slate-300 transition-colors"
+            >
+              <Languages className="w-3 h-3" />
+              {language === 'en' ? 'English' : 'हिंदी'}
+            </button>
+          )}
           <div className={`flex items-center gap-2 px-3 py-1 rounded font-mono font-bold ${timeLeft < 60 ? 'bg-red-900/50 text-red-500' : 'bg-slate-800 text-emerald-400'}`}>
             <Clock className="w-4 h-4" />
             {formatTime(timeLeft)}
@@ -710,11 +738,12 @@ const TestMode = ({ user, activeTest, setView, userRef }) => {
                 <span className="text-slate-500 font-bold text-lg">Q{currentQIndex + 1}.</span>
                 <p className="text-lg text-slate-200 leading-relaxed font-medium">
                   {currentQ.question}
+                  {getQuestionText(currentQ)}
                 </p>
               </div>
 
               <div className="space-y-3">
-                {currentQ.options.map((opt, idx) => (
+                {getOptions(currentQ).map((opt, idx) => (
                   <button
                     key={idx}
                     onClick={() => handleOptionSelect(idx)}
