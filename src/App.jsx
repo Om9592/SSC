@@ -22,7 +22,8 @@ import {
   query,
   orderBy,
   limit,
-  addDoc
+  addDoc,
+  deleteDoc
 } from 'firebase/firestore';
 import { 
   Shield, 
@@ -50,7 +51,8 @@ import {
   AlertCircle,
   Loader2,
   Scan,
-  Youtube
+  Youtube,
+  Trash2
 } from 'lucide-react';
 
 // --- CONFIGURATION ---
@@ -1113,7 +1115,7 @@ const FocusMode = ({ user, scheduleRef, todaySchedule, setView, userData, userRe
           <p className="text-slate-500 text-sm">{currentTask.type}</p>
         </div>
 
-        {isActive && embeddedVideo ? (
+        {embeddedVideo ? (
           <div className="w-full max-w-4xl flex flex-col items-center z-20">
             <div className="w-full aspect-video max-h-[50vh] bg-black rounded-xl overflow-hidden border border-slate-800 shadow-2xl ring-1 ring-emerald-500/50 mb-4">
               <iframe 
@@ -1138,7 +1140,7 @@ const FocusMode = ({ user, scheduleRef, todaySchedule, setView, userData, userRe
           </div>
         )}
 
-        {!isActive && !activeVideo && (
+        {!isActive && !activeVideo && !embeddedVideo && (
           <div className="mb-8 w-full max-w-xs relative z-20">
             <div className="relative group">
               <Youtube className="absolute left-3 top-3 w-4 h-4 text-slate-500 group-focus-within:text-red-500 transition-colors" />
@@ -1207,7 +1209,7 @@ const AnalysisView = ({ user, userData, setView, setActiveVideo }) => {
       limit(10)
     );
     const unsub = onSnapshot(q, (snap) => {
-      setHistory(snap.docs.map(d => d.data()));
+      setHistory(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     });
     return () => unsub();
   }, [user]);
@@ -1230,8 +1232,14 @@ const AnalysisView = ({ user, userData, setView, setActiveVideo }) => {
     setView('focus');
   };
 
+  const handleDelete = async (sessionId) => {
+    if (window.confirm("Are you sure you want to delete this history record?")) {
+      await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'sessions', sessionId));
+    }
+  };
+
   return (
-    <div className="p-4 space-y-6">
+    <div className="p-4 space-y-6 pb-24">
       <h2 className="text-xl font-bold flex items-center gap-2">
         <Brain className="w-5 h-5 text-emerald-500" />
         Performance Analysis
@@ -1272,27 +1280,33 @@ const AnalysisView = ({ user, userData, setView, setActiveVideo }) => {
             <p className="text-slate-500 text-xs italic">No sessions recorded yet.</p>
           ) : (
             history.map((session, idx) => (
-              <div key={idx} className="bg-slate-900 border border-slate-800 p-3 rounded-lg flex items-center justify-between group hover:border-slate-700 transition-colors">
-                <div>
+              <div key={session.id || idx} className="bg-slate-900 border border-slate-800 p-3 rounded-lg flex items-center justify-between group hover:border-slate-700 transition-colors">
+                <div className="flex-1 min-w-0 pr-3">
                   <p className="text-sm font-bold text-slate-200 truncate max-w-[200px]">{session.task}</p>
                   <p className="text-[10px] text-slate-500 flex items-center gap-2">
                     {new Date(session.timestamp).toLocaleDateString()} • {session.duration} mins
                     {session.videoId && <span className="text-emerald-500 flex items-center gap-1 bg-emerald-950/30 px-1.5 rounded"><Youtube className="w-3 h-3" /> Watched</span>}
                   </p>
                 </div>
-                {(session.videoId || session.videoUrl) && (
-                  <div className="flex items-center gap-2">
-                    <img 
-                      src={session.videoId ? `https://img.youtube.com/vi/${session.videoId}/mqdefault.jpg` : "https://via.placeholder.com/120x68/000000/FFFFFF?text=No+Thumb"} 
-                      alt="Thumbnail" 
-                      className="w-16 h-9 object-cover rounded border border-slate-800 opacity-80 hover:opacity-100 cursor-pointer"
-                      onClick={() => handleRewatch(session)}
-                    />
-                    <button onClick={() => handleRewatch(session)} className="p-2 bg-slate-950 rounded-full text-slate-400 hover:text-emerald-500 transition-colors">
-                      <Youtube className="w-4 h-4" />
-                    </button>
-                  </div>
-                )}
+                <div className="flex items-center gap-3">
+                  {(session.videoId || session.videoUrl) && (
+                    <div className="flex items-center gap-2">
+                      <img 
+                        src={session.videoId ? `https://img.youtube.com/vi/${session.videoId}/mqdefault.jpg` : "https://via.placeholder.com/120x68/000000/FFFFFF?text=No+Thumb"} 
+                        alt="Thumbnail" 
+                        className="w-16 h-9 object-cover rounded border border-slate-800 opacity-80 hover:opacity-100 cursor-pointer"
+                        onClick={() => handleRewatch(session)}
+                      />
+                    </div>
+                  )}
+                  <button 
+                    onClick={() => handleDelete(session.id)} 
+                    className="p-2 text-slate-600 hover:text-red-500 hover:bg-red-950/30 rounded-full transition-colors"
+                    title="Delete Record"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
               </div>
             ))
           )}
