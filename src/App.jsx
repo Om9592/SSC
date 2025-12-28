@@ -959,6 +959,7 @@ const FocusMode = ({ user, scheduleRef, todaySchedule, setView, userData, userRe
   const [breaches, setBreaches] = useState(0);
   const [youtubeLink, setYoutubeLink] = useState(activeVideo?.url || "");
   const [embeddedVideo, setEmbeddedVideo] = useState(activeVideo?.id || null);
+  const playerRef = useRef(null);
 
   useEffect(() => {
     if (activeVideo) {
@@ -974,6 +975,48 @@ const FocusMode = ({ user, scheduleRef, todaySchedule, setView, userData, userRe
     const match = url.trim().match(regExp);
     return match ? match[1] : null;
   };
+
+  useEffect(() => {
+    if (embeddedVideo) {
+      const loadPlayer = () => {
+        if (window.YT && window.YT.Player) {
+          if (playerRef.current) {
+            try { playerRef.current.destroy(); } catch (e) {}
+          }
+          playerRef.current = new window.YT.Player('youtube-player', {
+            height: '100%',
+            width: '100%',
+            videoId: embeddedVideo,
+            playerVars: {
+              'autoplay': 1,
+              'controls': 1,
+              'rel': 0,
+              'modestbranding': 1
+            },
+            events: {
+              'onReady': (event) => {
+                const duration = event.target.getDuration();
+                if (duration > 0) {
+                  setTimeLeft(Math.floor(duration));
+                }
+              }
+            }
+          });
+        }
+      };
+
+      if (!window.YT) {
+        const tag = document.createElement('script');
+        tag.src = "https://www.youtube.com/iframe_api";
+        const firstScriptTag = document.getElementsByTagName('script')[0];
+        firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
+        window.onYouTubeIframeAPIReady = loadPlayer;
+      } else {
+        setTimeout(loadPlayer, 100);
+      }
+    }
+    return () => { if (playerRef.current) { try { playerRef.current.destroy(); } catch(e){} } };
+  }, [embeddedVideo]);
 
   useEffect(() => {
     let interval = null;
@@ -1075,7 +1118,8 @@ const FocusMode = ({ user, scheduleRef, todaySchedule, setView, userData, userRe
     );
   }
 
-  const minutes = Math.floor(timeLeft / 60);
+  const hours = Math.floor(timeLeft / 3600);
+  const minutes = Math.floor((timeLeft % 3600) / 60);
   const seconds = timeLeft % 60;
 
   return (
@@ -1118,24 +1162,16 @@ const FocusMode = ({ user, scheduleRef, todaySchedule, setView, userData, userRe
         {embeddedVideo ? (
           <div className="w-full max-w-4xl flex flex-col items-center z-20">
             <div className="w-full aspect-video max-h-[50vh] bg-black rounded-xl overflow-hidden border border-slate-800 shadow-2xl ring-1 ring-emerald-500/50 mb-4">
-              <iframe 
-                width="100%" 
-                height="100%" 
-                src={`https://www.youtube.com/embed/${embeddedVideo}?autoplay=1&controls=1&rel=0&modestbranding=1`} 
-                title="YouTube Focus Mode" 
-                frameBorder="0" 
-                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" 
-                allowFullScreen
-              ></iframe>
+              <div id="youtube-player"></div>
             </div>
             <div className="text-3xl font-black font-mono text-emerald-500 tabular-nums bg-slate-900/80 px-4 py-2 rounded-lg backdrop-blur">
-              {minutes.toString().padStart(2, '0')}:{seconds.toString().padStart(2, '0')}
+              {hours.toString().padStart(2, '0')}:{minutes.toString().padStart(2, '0')}:{seconds.toString().padStart(2, '0')}
             </div>
           </div>
         ) : (
           <div className="relative z-10 mb-12">
-            <div className="text-8xl font-black font-mono tracking-tighter text-white tabular-nums">
-              {minutes.toString().padStart(2, '0')}:{seconds.toString().padStart(2, '0')}
+            <div className="text-6xl sm:text-8xl font-black font-mono tracking-tighter text-white tabular-nums">
+              {hours.toString().padStart(2, '0')}:{minutes.toString().padStart(2, '0')}:{seconds.toString().padStart(2, '0')}
             </div>
           </div>
         )}
