@@ -425,7 +425,9 @@ const LibraryView = ({ user, setView, setActiveTest }) => {
     - question_hi (Hindi translation)
     - options_en (array of 4 English strings)
     - options_hi (array of 4 Hindi strings)
-    - correctIndex (0-3).
+    - correctIndex (0-3)
+    - explanation_en (Detailed solution in English)
+    - explanation_hi (Detailed solution in Hindi).
     IMPORTANT: Return Strictly Valid JSON. Escape all backslashes in math formulas (e.g. use \\\\theta instead of \\theta).`;
 
     try {
@@ -684,6 +686,11 @@ const TestMode = ({ user, activeTest, setView, userRef }) => {
     return q.options_en || q.options || [];
   };
 
+  const getExplanation = (q) => {
+    if (language === 'hi' && q.explanation_hi) return q.explanation_hi;
+    return q.explanation_en || q.explanation || "Solution not available for this question.";
+  };
+
   return (
     <div className="flex flex-col h-screen bg-slate-950">
       <div className="h-14 bg-slate-900 border-b border-slate-800 flex items-center justify-between px-4">
@@ -724,12 +731,64 @@ const TestMode = ({ user, activeTest, setView, userRef }) => {
       <div className="flex-1 flex overflow-hidden">
         <div className="flex-1 p-6 overflow-y-auto">
           {isSubmitted ? (
-            <div className="max-w-md mx-auto text-center space-y-6 pt-10">
-              <div className="bg-slate-900 border border-slate-800 p-8 rounded-2xl">
+            <div className="max-w-3xl mx-auto space-y-8 pt-6 pb-20">
+              <div className="bg-slate-900 border border-slate-800 p-8 rounded-2xl text-center">
                 <CheckSquare className="w-16 h-16 text-emerald-500 mx-auto mb-4" />
                 <h2 className="text-3xl font-bold text-white mb-2">Test Submitted</h2>
                 <div className="text-6xl font-black text-emerald-400 mb-2">{score} / {activeTest.questions.length}</div>
                 <p className="text-slate-500">Discipline Breaches: <span className="text-red-500 font-bold">{breaches}</span></p>
+              </div>
+
+              <div className="space-y-6">
+                <div className="flex items-center justify-between px-2">
+                  <h3 className="text-xl font-bold text-white flex items-center gap-2">
+                    <BookOpen className="w-5 h-5 text-emerald-500" />
+                    Detailed Solutions
+                  </h3>
+                </div>
+                
+                {activeTest.questions.map((q, idx) => (
+                  <div key={idx} className="bg-slate-900 border border-slate-800 p-6 rounded-xl">
+                    <div className="flex gap-3 mb-4">
+                      <span className="font-bold text-slate-500 shrink-0">Q{idx + 1}.</span>
+                      <p className="font-medium text-slate-200 leading-relaxed">
+                        {getQuestionText(q)}
+                      </p>
+                    </div>
+
+                    <div className="space-y-2 mb-5">
+                      {getOptions(q).map((opt, optIdx) => {
+                        const isSelected = responses[idx] === optIdx;
+                        const isCorrect = q.correctIndex === optIdx;
+                        let style = "border-slate-800 bg-slate-950 text-slate-400";
+                        
+                        if (isCorrect) {
+                          style = "border-emerald-500 bg-emerald-900/20 text-emerald-400 ring-1 ring-emerald-500";
+                        } else if (isSelected) {
+                          style = "border-red-500 bg-red-900/20 text-red-400";
+                        }
+
+                        return (
+                          <div key={optIdx} className={`p-3 rounded-lg border text-sm flex items-center justify-between ${style}`}>
+                            <span>{opt}</span>
+                            {isCorrect && <CheckCircle className="w-4 h-4 shrink-0" />}
+                            {isSelected && !isCorrect && <XCircle className="w-4 h-4 shrink-0" />}
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    <div className="bg-slate-950 p-4 rounded-lg border border-slate-800 relative overflow-hidden">
+                      <div className="absolute top-0 left-0 w-1 h-full bg-emerald-500"></div>
+                      <p className="text-[10px] font-bold text-emerald-500 uppercase tracking-widest mb-2">
+                        Solution / Explanation
+                      </p>
+                      <p className="text-sm text-slate-300 leading-relaxed whitespace-pre-wrap">
+                        {getExplanation(q)}
+                      </p>
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
           ) : (
