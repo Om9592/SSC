@@ -299,11 +299,6 @@ const AuthGate = ({ children }) => {
           <p className="text-xs text-slate-600">
             Optimize your preparation for SSC CGL 2024-2025. Covers Quantitative Aptitude, General Intelligence & Reasoning, English Comprehension, and General Awareness.
           </p>
-          <div className="pt-4 border-t border-slate-800/50">
-             <p className="text-[10px] text-slate-500 font-mono">
-               SEARCH KEYWORDS: <span className="text-emerald-500">SSC CGL Command Center</span> • <span className="text-emerald-500">SSC CGL AI Planner</span> • <span className="text-emerald-500">Free Mock Test</span>
-             </p>
-          </div>
         </div>
       </div>
     );
