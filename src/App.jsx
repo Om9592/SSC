@@ -117,6 +117,38 @@ const generateAIResponse = async (prompt, systemInstruction) => {
   }
 };
 
+// --- SEO UTILS ---
+const updateSEO = (title, description, keywords, jsonLd) => {
+  document.title = title;
+  
+  // Update Meta Description
+  let metaDesc = document.querySelector("meta[name='description']");
+  if (!metaDesc) {
+    metaDesc = document.createElement("meta");
+    metaDesc.name = "description";
+    document.head.appendChild(metaDesc);
+  }
+  metaDesc.content = description;
+
+  // Update Meta Keywords
+  let metaKeywords = document.querySelector("meta[name='keywords']");
+  if (!metaKeywords) {
+    metaKeywords = document.createElement("meta");
+    metaKeywords.name = "keywords";
+    document.head.appendChild(metaKeywords);
+  }
+  metaKeywords.content = keywords;
+
+  // Update JSON-LD (Structured Data for Google)
+  let scriptJson = document.querySelector("script[type='application/ld+json']");
+  if (!scriptJson) {
+    scriptJson = document.createElement("script");
+    scriptJson.type = "application/ld+json";
+    document.head.appendChild(scriptJson);
+  }
+  scriptJson.text = JSON.stringify(jsonLd);
+};
+
 // --- COMPONENT: AUTH GATE ---
 const AuthGate = ({ children }) => {
   const [user, setUser] = useState(null);
@@ -155,7 +187,10 @@ const AuthGate = ({ children }) => {
 
   if (!user) {
     return (
-      <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4">
+      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-4">
+        {/* SEO HIDDEN HEADER FOR CRAWLERS */}
+        <h1 className="sr-only">SSC CGL Command Center - Best AI Preparation App for SSC CGL 2025</h1>
+
         <div className="bg-slate-900 p-8 rounded-lg shadow-xl max-w-md w-full">
           <h1 className="text-2xl font-bold text-emerald-500 mb-6 text-center">
             SSC CGL Command Center
@@ -204,6 +239,27 @@ const AuthGate = ({ children }) => {
             </button>
           </div>
         </div>
+
+        {/* SEO CONTENT SECTION (Visible & Crawlable) */}
+        <div className="max-w-2xl mt-12 text-slate-400 text-sm space-y-6 text-center">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
+            <div className="p-3 border border-slate-800 rounded bg-slate-900/50">
+              <h3 className="text-emerald-500 font-bold mb-1">AI Study Planner</h3>
+              <p>Automated daily schedules for SSC CGL, CHSL, and MTS based on your weak areas.</p>
+            </div>
+            <div className="p-3 border border-slate-800 rounded bg-slate-900/50">
+              <h3 className="text-emerald-500 font-bold mb-1">Smart Mock Tests</h3>
+              <p>Generate unlimited mock tests from PDFs or text for Quant, Reasoning & English.</p>
+            </div>
+            <div className="p-3 border border-slate-800 rounded bg-slate-900/50">
+              <h3 className="text-emerald-500 font-bold mb-1">Discipline Tracker</h3>
+              <p>Gamified focus mode to ensure 7+ hours of daily study for government exams.</p>
+            </div>
+          </div>
+          <p className="text-xs text-slate-600">
+            Optimize your preparation for SSC CGL 2024-2025. Covers Quantitative Aptitude, General Intelligence & Reasoning, English Comprehension, and General Awareness. The ultimate tool for government job aspirants.
+          </p>
+        </div>
       </div>
     );
   }
@@ -228,6 +284,8 @@ const Dashboard = ({ user }) => {
   const [activeTest, setActiveTest] = useState(null); 
   const [loading, setLoading] = useState(true);
   const [activeVideo, setActiveVideo] = useState(null);
+  const [activeTaskIndex, setActiveTaskIndex] = useState(null);
+  const [generating, setGenerating] = useState(false);
 
   // Firestore Refs
   const userRef = doc(db, 'artifacts', appId, 'users', user.uid, 'profile', 'main');
@@ -265,11 +323,108 @@ const Dashboard = ({ user }) => {
     };
   }, [user]);
 
+  // --- SEO & METADATA MANAGEMENT ---
+  useEffect(() => {
+    const viewMeta = {
+      dashboard: { 
+        title: "Mission Control | SSC CGL AI Planner", 
+        desc: "Track your daily SSC CGL study targets, discipline score, and progress. The best app for SSC CGL 2025 preparation.",
+        keywords: "SSC CGL, Study Planner, Daily Targets, Government Job, SSC Preparation App"
+      },
+      library: { 
+        title: "Smart Library | SSC Mock Test Generator", 
+        desc: "Upload study materials and generate AI-powered mock tests for SSC CGL preparation. Convert PDFs to Quizzes instantly.",
+        keywords: "SSC Mock Test, PDF to Quiz, AI Question Generator, SSC CGL Previous Papers"
+      },
+      focus: { 
+        title: "Focus Mode | Deep Work Timer", 
+        desc: "Distraction-free study timer with YouTube integration and discipline tracking for serious aspirants.",
+        keywords: "Pomodoro for Students, Study Timer, Focus App, SSC CGL Discipline"
+      },
+      test: { 
+        title: "CBT Mock Test | SSC CGL Exam Interface", 
+        desc: "Attempt strict time-bound mock tests to improve speed and accuracy. Simulates real SSC CGL exam environment.",
+        keywords: "SSC CGL Mock Test Free, CBT Exam, Online Test Series"
+      },
+      analysis: { 
+        title: "Performance Analysis | AI Coach", 
+        desc: "Get AI-driven insights on your study habits and test performance. Identify weak areas in Quant and English.",
+        keywords: "Exam Analysis, Performance Tracker, AI Education Coach"
+      }
+    };
+
+    const current = viewMeta[view] || viewMeta.dashboard;
+    document.title = `${current.title} | SSC CGL Command Center`;
+    
+    // Structured Data for Rich Snippets (Google Search Cards)
+    const jsonLd = {
+      "@context": "https://schema.org",
+      "@type": "SoftwareApplication",
+      "name": "SSC CGL Command Center",
+      "applicationCategory": "EducationalApplication",
+      "operatingSystem": "Web",
+      "description": current.desc,
+      "offers": { "@type": "Offer", "price": "0", "priceCurrency": "INR" }
+    };
+
+    // Update Meta Description
+    let metaDesc = document.querySelector("meta[name='description']");
+    if (!metaDesc) {
+      metaDesc = document.createElement("meta");
+      metaDesc.name = "description";
+      document.head.appendChild(metaDesc);
+    }
+    metaDesc.content = current.desc;
+
+    updateSEO(current.title, current.desc, current.keywords, jsonLd);
+    document.documentElement.lang = 'en'; // Keep language setting
+  }, [view]);
+
+  const handleGeneratePlan = async () => {
+    setGenerating(true);
+    try {
+      // Optional: Fetch library context if needed, currently just using weak areas
+      const weakAreas = userData?.weakSubjects?.join(", ") || "General Awareness";
+      
+      const systemPrompt = `You are a strict Exam Planner AI. 
+      Create a JSON schedule for an SSC CGL aspirant. 
+      Total time MUST be approx 7 hours.
+      MANDATORY: Include exactly one 60-minute session titled "Reading & Practice Task" that uses the user's uploaded library material.
+      Focus on: ${weakAreas}.
+      Format: JSON Array of objects: [{"title": "Subject", "duration_min": 90, "type": "Deep Work"}, ...]
+      IMPORTANT: Return Strictly Valid JSON. Escape all backslashes in strings.`;
+
+      const userPrompt = `Generate today's plan. Date: ${new Date().toLocaleDateString()}. Make it hard.`;
+
+      const rawText = await generateAIResponse(userPrompt, systemPrompt);
+      const jsonMatch = rawText.match(/\[.*\]/s);
+      if (jsonMatch) {
+        const plan = safeJSONParse(jsonMatch[0]); 
+        if (plan) {
+            await setDoc(scheduleRef, {
+            date: new Date().toISOString(),
+            blocks: plan.map(p => ({...p, status: 'pending'})),
+            totalMinutesDone: 0,
+            targetMinutes: plan.reduce((acc, curr) => acc + curr.duration_min, 0)
+            });
+        } else {
+            alert("AI returned invalid JSON. Please try again.");
+        }
+      } else {
+        alert("AI Planning Failed. Try again.");
+      }
+    } catch (e) {
+      console.error(e);
+      alert("Planning Error. Check console.");
+    }
+    setGenerating(false);
+  };
+
   const renderView = () => {
     switch(view) {
-      case 'dashboard': return <HomeView user={user} userData={userData} todaySchedule={todaySchedule} setView={setView} scheduleRef={scheduleRef} />;
+      case 'dashboard': return <HomeView user={user} userData={userData} todaySchedule={todaySchedule} setView={setView} scheduleRef={scheduleRef} setActiveTaskIndex={setActiveTaskIndex} handleGeneratePlan={handleGeneratePlan} generating={generating} />;
       case 'library': return <LibraryView user={user} setView={setView} setActiveTest={setActiveTest} />;
-      case 'focus': return <FocusMode user={user} scheduleRef={scheduleRef} todaySchedule={todaySchedule} setView={setView} userData={userData} userRef={userRef} activeVideo={activeVideo} setActiveVideo={setActiveVideo} />;
+      case 'focus': return <FocusMode user={user} scheduleRef={scheduleRef} todaySchedule={todaySchedule} setView={setView} userData={userData} userRef={userRef} activeVideo={activeVideo} setActiveVideo={setActiveVideo} activeTaskIndex={activeTaskIndex} setActiveTaskIndex={setActiveTaskIndex} handleGeneratePlan={handleGeneratePlan} generating={generating} />;
       case 'test': return <TestMode user={user} activeTest={activeTest} setView={setView} userRef={userRef} />;
       case 'analysis': return <AnalysisView user={user} userData={userData} setView={setView} setActiveVideo={setActiveVideo} />;
       default: return <HomeView user={user} userData={userData} todaySchedule={todaySchedule} setView={setView} scheduleRef={scheduleRef} />;
@@ -285,6 +440,7 @@ const Dashboard = ({ user }) => {
               <button 
                 onClick={() => setView('dashboard')} 
                 className="p-1 hover:bg-slate-800 rounded-full transition-colors"
+                aria-label="Back to Dashboard"
               >
                 <ArrowLeft className="w-5 h-5 text-slate-400 hover:text-white" />
               </button>
@@ -306,6 +462,7 @@ const Dashboard = ({ user }) => {
               onClick={() => signOut(auth)} 
               className="p-1 hover:bg-slate-800 rounded-full transition-colors"
               title="Logout"
+              aria-label="Sign Out"
             >
               <LogOut className="w-5 h-5 text-slate-400 hover:text-white" />
             </button>
@@ -325,7 +482,7 @@ const Dashboard = ({ user }) => {
         <nav className="fixed bottom-0 left-0 right-0 bg-slate-900 border-t border-slate-800 flex justify-around p-3 pb-5 z-40">
           <NavBtn icon={Target} label="Mission" active={view === 'dashboard'} onClick={() => setView('dashboard')} />
           <NavBtn icon={BookOpen} label="Library" active={view === 'library'} onClick={() => setView('library')} />
-          <NavBtn icon={Zap} label="Focus" active={view === 'focus'} onClick={() => setView('focus')} />
+          <NavBtn icon={Zap} label="Focus" active={view === 'focus'} onClick={() => { setView('focus'); setActiveTaskIndex(null); }} />
           <NavBtn icon={Brain} label="Analysis" active={view === 'analysis'} onClick={() => setView('analysis')} />
         </nav>
       )}
@@ -470,6 +627,7 @@ const LibraryView = ({ user, setView, setActiveTest }) => {
         <button 
           onClick={() => setIsAdding(true)}
           className="bg-emerald-600 hover:bg-emerald-500 text-white p-2 rounded-lg transition-colors"
+          aria-label="Add New Material"
         >
           <Plus className="w-5 h-5" />
         </button>
@@ -512,6 +670,10 @@ const LibraryView = ({ user, setView, setActiveTest }) => {
             <div 
               className="border-2 border-dashed border-slate-800 rounded p-8 text-center bg-slate-950 group hover:border-slate-700 transition-colors cursor-pointer relative overflow-hidden"
               onClick={() => fileInputRef.current?.click()}
+              role="button"
+              tabIndex={0}
+              aria-label="Upload PDF or Image"
+              onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && fileInputRef.current?.click()}
             >
               <input 
                 type="file" 
@@ -700,6 +862,7 @@ const TestMode = ({ user, activeTest, setView, userRef }) => {
             <button 
               onClick={() => setLanguage(l => l === 'en' ? 'hi' : 'en')}
               className="flex items-center gap-2 px-3 py-1 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded text-xs font-bold text-slate-300 transition-colors"
+              aria-label="Switch Language"
             >
               <Languages className="w-3 h-3" />
               {language === 'en' ? 'English' : 'हिंदी'}
@@ -877,54 +1040,9 @@ const TestMode = ({ user, activeTest, setView, userRef }) => {
 };
 
 // --- VIEW: HOME / DASHBOARD ---
-const HomeView = ({ user, userData, todaySchedule, setView, scheduleRef }) => {
-  const [generating, setGenerating] = useState(false);
-
-  const handleGeneratePlan = async () => {
-    setGenerating(true);
-    let libraryContext = "";
-    try {
-      const matSnap = await getDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'materials', 'latest')); 
-    } catch(e) {}
-
-    const weakAreas = userData?.weakSubjects?.join(", ") || "General Awareness";
-    
-    const systemPrompt = `You are a strict Exam Planner AI. 
-    Create a JSON schedule for an SSC CGL aspirant. 
-    Total time MUST be approx 7 hours.
-    MANDATORY: Include exactly one 60-minute session titled "Reading & Practice Task" that uses the user's uploaded library material.
-    Focus on: ${weakAreas}.
-    Format: JSON Array of objects: [{"title": "Subject", "duration_min": 90, "type": "Deep Work"}, ...]
-    IMPORTANT: Return Strictly Valid JSON. Escape all backslashes in strings.`;
-
-    const userPrompt = `Generate today's plan. Date: ${new Date().toLocaleDateString()}. Make it hard.`;
-
-    try {
-      const rawText = await generateAIResponse(userPrompt, systemPrompt);
-      const jsonMatch = rawText.match(/\[.*\]/s);
-      if (jsonMatch) {
-        const plan = safeJSONParse(jsonMatch[0]); 
-        if (plan) {
-            await setDoc(scheduleRef, {
-            date: new Date().toISOString(),
-            blocks: plan.map(p => ({...p, status: 'pending'})),
-            totalMinutesDone: 0,
-            targetMinutes: plan.reduce((acc, curr) => acc + curr.duration_min, 0)
-            });
-        } else {
-            alert("AI returned invalid JSON. Please try again.");
-        }
-      } else {
-        alert("AI Planning Failed. Try again.");
-      }
-    } catch (e) {
-      console.error(e);
-      alert("Planning Error. Check console.");
-    }
-    setGenerating(false);
-  };
-
+const HomeView = ({ user, userData, todaySchedule, setView, scheduleRef, setActiveTaskIndex, handleGeneratePlan, generating }) => {
   const progress = todaySchedule ? (todaySchedule.totalMinutesDone / TARGET_MINUTES) * 100 : 0;
+  const isPlanComplete = todaySchedule && todaySchedule.blocks.every(b => b.status === 'completed');
 
   return (
     <div className="p-4 space-y-6 pb-24">
@@ -968,14 +1086,14 @@ const HomeView = ({ user, userData, todaySchedule, setView, scheduleRef }) => {
             <Calendar className="w-4 h-4 text-slate-400" />
             Tactical Plan
           </h2>
-          {!todaySchedule && (
+          {(!todaySchedule || isPlanComplete) && (
             <button 
               onClick={handleGeneratePlan}
               disabled={generating}
               className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs px-3 py-1.5 rounded-lg font-bold flex items-center gap-2 transition-colors"
             >
               {generating ? <Clock className="w-3 h-3 animate-spin" /> : <Zap className="w-3 h-3" />}
-              AUTO-GENERATE
+              {isPlanComplete ? "GENERATE NEW PLAN" : "AUTO-GENERATE"}
             </button>
           )}
         </div>
@@ -1002,16 +1120,21 @@ const HomeView = ({ user, userData, todaySchedule, setView, scheduleRef }) => {
                   </h3>
                   <div className="flex items-center gap-2 mt-1">
                     <span className="text-xs text-slate-500 bg-slate-950 px-2 py-0.5 rounded">
-                      {block.duration_min} mins
+                      {block.completed_min || 0} / {block.duration_min} mins
                     </span>
                     <span className="text-[10px] text-slate-500 uppercase tracking-wide">
                       {block.type}
                     </span>
                   </div>
+                  {block.status === 'pending' && (block.completed_min || 0) > 0 && (
+                    <div className="w-24 h-1 bg-slate-800 rounded-full mt-2 overflow-hidden">
+                      <div className="h-full bg-emerald-500" style={{ width: `${Math.min(100, ((block.completed_min || 0) / block.duration_min) * 100)}%` }}></div>
+                    </div>
+                  )}
                 </div>
                 {block.status === 'pending' && (
                   <button 
-                    onClick={() => setView('focus')}
+                    onClick={() => { setActiveTaskIndex(idx); setView('focus'); }}
                     className="bg-slate-800 hover:bg-slate-700 p-2 rounded-full transition-colors"
                   >
                     <ChevronRight className="w-4 h-4 text-emerald-500" />
@@ -1028,26 +1151,46 @@ const HomeView = ({ user, userData, todaySchedule, setView, scheduleRef }) => {
 };
 
 // --- VIEW: FOCUS MODE (THE DISCIPLINE ENGINE) ---
-const FocusMode = ({ user, scheduleRef, todaySchedule, setView, userData, userRef, activeVideo, setActiveVideo }) => {
+const FocusMode = ({ user, scheduleRef, todaySchedule, setView, userData, userRef, activeVideo, setActiveVideo, activeTaskIndex, setActiveTaskIndex, handleGeneratePlan, generating }) => {
   const blocks = todaySchedule?.blocks || [];
-  const currentTaskIndex = blocks.findIndex(b => b.status === 'pending');
-  let currentTask = currentTaskIndex !== -1 ? blocks[currentTaskIndex] : null;
+  
+  // Determine if we are in Custom Mode or Schedule Mode
+  const [isCustom, setIsCustom] = useState(activeTaskIndex === null && !activeVideo);
+  const [customConfirmed, setCustomConfirmed] = useState(false);
+  const [customTaskInput, setCustomTaskInput] = useState({ title: "", duration: 30 });
 
-  if (activeVideo) {
-    currentTask = {
-      title: activeVideo.title || "Video Revision",
-      duration_min: 30,
-      type: "Revision",
-      isAdHoc: true
-    };
-  }
+  // Derive the effective task based on mode
+  const currentTask = useMemo(() => {
+    if (activeVideo) {
+      return { title: activeVideo.title || "Video Revision", duration_min: 30, type: "Revision", isAdHoc: true };
+    }
+    if (isCustom) {
+      return { title: customTaskInput.title || "Self Study Session", duration_min: customTaskInput.duration, type: "Custom", isAdHoc: true };
+    }
+    if (activeTaskIndex !== null && blocks[activeTaskIndex]) {
+      const b = blocks[activeTaskIndex];
+      // Calculate remaining time for the timer
+      const remaining = Math.max(5, b.duration_min - (b.completed_min || 0));
+      return { ...b, duration_min: remaining, original_duration: b.duration_min };
+    }
+    return null;
+  }, [activeVideo, isCustom, activeTaskIndex, blocks, customTaskInput]);
 
-  const [timeLeft, setTimeLeft] = useState(currentTask ? currentTask.duration_min * 60 : 25 * 60);
+  const [timeLeft, setTimeLeft] = useState(currentTask ? currentTask.duration_min * 60 : 30 * 60);
+  const [initialDuration, setInitialDuration] = useState(currentTask ? currentTask.duration_min * 60 : 30 * 60);
   const [isActive, setIsActive] = useState(false);
   const [breaches, setBreaches] = useState(0);
   const [youtubeLink, setYoutubeLink] = useState(activeVideo?.url || "");
   const [embeddedVideo, setEmbeddedVideo] = useState(activeVideo?.id || null);
   const playerRef = useRef(null);
+
+  // Reset timer when task changes
+  useEffect(() => {
+    if (currentTask) {
+      setTimeLeft(currentTask.duration_min * 60);
+      setInitialDuration(currentTask.duration_min * 60);
+    }
+  }, [currentTask?.title, currentTask?.duration_min]);
 
   useEffect(() => {
     if (activeVideo) {
@@ -1086,6 +1229,7 @@ const FocusMode = ({ user, scheduleRef, todaySchedule, setView, userData, userRe
                 const duration = event.target.getDuration();
                 if (duration > 0) {
                   setTimeLeft(Math.floor(duration));
+                  setInitialDuration(Math.floor(duration));
                 }
               }
             }
@@ -1149,8 +1293,8 @@ const FocusMode = ({ user, scheduleRef, todaySchedule, setView, userData, userRe
     if (!currentTask) return;
     
     // Calculate actual time spent (in case of early finish)
-    const totalSeconds = currentTask.duration_min * 60;
-    const spentSeconds = totalSeconds - timeLeft;
+    // Use initialDuration to ensure accurate tracking for dynamic video lengths
+    const spentSeconds = initialDuration - timeLeft;
     const spentMinutes = Math.max(1, Math.floor(spentSeconds / 60));
 
     // SAFETY CHECK: Ensure video ID is captured even if state was slightly off
@@ -1159,17 +1303,42 @@ const FocusMode = ({ user, scheduleRef, todaySchedule, setView, userData, userRe
         finalVideoId = getYoutubeId(youtubeLink);
     }
 
-    if (!currentTask.isAdHoc) {
-      const newBlocks = [...blocks];
-      newBlocks[currentTaskIndex].status = 'completed';
-      await updateDoc(scheduleRef, {
-        blocks: newBlocks,
-        totalMinutesDone: increment(spentMinutes)
-      });
+    // 1. Update User Global Stats (Total Hours & Discipline)
+    const userUpdates = {
+      totalHoursStudied: increment(spentMinutes / 60)
+    };
+    
+    // PENALTY CHECK: If user quits with significant time left (> 1 min)
+    if (timeLeft > 60) {
+      userUpdates.disciplineScore = increment(-5); // Penalty for early exit
+      alert("⚠️ DISCIPLINE PENALTY: Session abandoned early! (-5 Points)");
+    } else if (breaches === 0) {
+      userUpdates.disciplineScore = increment(1);
     }
+    await updateDoc(userRef, userUpdates);
 
-    if (breaches === 0) {
-      await updateDoc(userRef, { disciplineScore: increment(1) });
+    // 2. Update Daily Schedule (if exists)
+    if (todaySchedule) {
+      const scheduleUpdates = { totalMinutesDone: increment(spentMinutes) };
+      
+      // Only update block status if it's a Scheduled Task (not Custom/AdHoc)
+      if (!currentTask.isAdHoc && activeTaskIndex !== null) {
+        const newBlocks = [...blocks];
+        const block = newBlocks[activeTaskIndex];
+        
+        // Accumulate time
+        const previousDone = block.completed_min || 0;
+        const newDone = previousDone + spentMinutes;
+        block.completed_min = newDone;
+
+        // Only mark completed if actual time spent >= target duration
+        if (newDone >= block.duration_min) {
+          block.status = 'completed';
+        }
+        
+        scheduleUpdates.blocks = newBlocks;
+      }
+      await updateDoc(scheduleRef, scheduleUpdates);
     }
     const sessionRef = doc(collection(db, 'artifacts', appId, 'users', user.uid, 'sessions'));
     await setDoc(sessionRef, {
@@ -1185,7 +1354,17 @@ const FocusMode = ({ user, scheduleRef, todaySchedule, setView, userData, userRe
     setView('dashboard');
   };
 
-  if ((!todaySchedule || blocks.length === 0) && !activeVideo) {
+  // If no schedule and not custom mode, force custom mode
+  if ((!todaySchedule || blocks.length === 0) && !activeVideo && !isCustom) {
+    setIsCustom(true);
+  }
+
+  /* 
+     REMOVED: The "No Active Mission" block. 
+     REASON: User wants option to enter plan in focus mode.
+  */
+
+  if (!currentTask && !activeVideo && !isCustom) {
     return (
       <div className="h-full flex flex-col items-center justify-center p-8 text-center space-y-4 bg-black">
         <AlertTriangle className="w-16 h-16 text-yellow-500" />
@@ -1201,6 +1380,13 @@ const FocusMode = ({ user, scheduleRef, todaySchedule, setView, userData, userRe
       <div className="h-full flex flex-col items-center justify-center p-8 text-center space-y-4">
         <CheckCircle className="w-16 h-16 text-emerald-500" />
         <h2 className="text-2xl font-bold text-white">All Tasks Complete</h2>
+        <button 
+          onClick={handleGeneratePlan}
+          disabled={generating}
+          className="bg-emerald-600 hover:bg-emerald-500 text-white px-6 py-3 rounded-lg font-bold flex items-center gap-2 mx-auto"
+        >
+          {generating ? <Loader2 className="w-5 h-5 animate-spin" /> : "GENERATE NEW PLAN"}
+        </button>
         <button onClick={() => setView('dashboard')} className="text-emerald-500 underline">Return to Base</button>
       </div>
     );
@@ -1218,6 +1404,7 @@ const FocusMode = ({ user, scheduleRef, todaySchedule, setView, userData, userRe
           setView('dashboard');
         }}
         className="fixed top-5 left-5 z-50 text-slate-500 hover:text-white p-2 bg-slate-900/50 rounded-full backdrop-blur-sm transition-all hover:bg-slate-800"
+        aria-label="Exit Focus Mode"
       >
         <ArrowLeft className="w-6 h-6" />
       </button>
@@ -1230,6 +1417,58 @@ const FocusMode = ({ user, scheduleRef, todaySchedule, setView, userData, userRe
         </div>
       )}
 
+      {/* CUSTOM TASK INPUT OVERLAY */}
+      {isCustom && !customConfirmed && !isActive && !activeVideo && (
+        <div className="absolute inset-0 z-30 bg-slate-950/90 flex items-center justify-center p-6">
+          <div className="w-full max-w-sm bg-slate-900 border border-slate-800 p-6 rounded-xl space-y-4">
+            <h3 className="text-xl font-bold text-white flex items-center gap-2">
+              <Target className="w-5 h-5 text-emerald-500" />
+              Set Custom Focus
+            </h3>
+            <div>
+              <label className="text-xs text-slate-500 uppercase font-bold">Task Name</label>
+              <input 
+                type="text" 
+                className="w-full bg-slate-950 border border-slate-800 rounded p-2 text-white mt-1 focus:border-emerald-500 outline-none"
+                placeholder="e.g. Math Practice, Reading..."
+                value={customTaskInput.title}
+                onChange={e => setCustomTaskInput({...customTaskInput, title: e.target.value})}
+              />
+            </div>
+            <div>
+              <label className="text-xs text-slate-500 uppercase font-bold">Duration (Minutes)</label>
+              <input 
+                type="number" 
+                className="w-full bg-slate-950 border border-slate-800 rounded p-2 text-white mt-1 focus:border-emerald-500 outline-none"
+                value={customTaskInput.duration}
+                onChange={e => setCustomTaskInput({...customTaskInput, duration: parseInt(e.target.value) || 30})}
+              />
+            </div>
+            <button 
+              onClick={() => setCustomConfirmed(true)}
+              className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 rounded-lg"
+            >
+              START SESSION
+            </button>
+            
+            <button 
+              onClick={() => { setIsCustom(false); handleGeneratePlan(); }}
+              disabled={generating}
+              className="w-full bg-slate-800 hover:bg-slate-700 text-emerald-400 font-bold py-3 rounded-lg border border-slate-700 flex items-center justify-center gap-2"
+            >
+              {generating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />}
+              GENERATE AI PLAN
+            </button>
+
+            {todaySchedule && (
+              <button onClick={() => { setIsCustom(false); setActiveTaskIndex(null); setView('dashboard'); }} className="w-full text-slate-500 text-sm hover:text-white">
+                Cancel & Return to Schedule
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
       <div className="min-h-screen flex flex-col items-center justify-center p-4 py-20 relative">
         {isActive && (
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
@@ -1239,12 +1478,18 @@ const FocusMode = ({ user, scheduleRef, todaySchedule, setView, userData, userRe
 
         <div className="text-center space-y-2 mb-12 relative z-10">
           <span className="inline-block px-3 py-1 bg-slate-900 rounded-full text-slate-400 text-xs font-mono border border-slate-800">
-            CURRENT MISSION
+            {isCustom ? "CUSTOM SESSION" : "SCHEDULED MISSION"}
           </span>
           <h2 className="text-2xl font-bold text-white max-w-xs mx-auto leading-tight">
-            {currentTask.title}
+            {currentTask?.title}
           </h2>
-          <p className="text-slate-500 text-sm">{currentTask.type}</p>
+          <p className="text-slate-500 text-sm">{currentTask?.type}</p>
+          
+          {!isActive && !isCustom && !activeVideo && (
+            <button onClick={() => { setIsCustom(true); setCustomConfirmed(false); }} className="text-xs text-emerald-500 underline mt-2">
+              Switch to Custom Task
+            </button>
+          )}
         </div>
 
         {embeddedVideo ? (
@@ -1297,12 +1542,13 @@ const FocusMode = ({ user, scheduleRef, todaySchedule, setView, userData, userRe
                 ? 'bg-yellow-600 hover:bg-yellow-500 text-white' 
                 : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-900/50'
             }`}
+            aria-label={isActive ? "Pause Focus Timer" : "Start Focus Timer"}
           >
             {isActive ? <Lock className="w-8 h-8" /> : <Zap className="w-8 h-8" />}
           </button>
         </div>
 
-        {!isActive && timeLeft !== (currentTask.duration_min * 60) && (
+        {!isActive && currentTask && timeLeft !== (currentTask.duration_min * 60) && (
           <button 
             onClick={completeSession}
             className="mt-8 text-xs text-slate-400 hover:text-white border border-slate-800 hover:border-emerald-500 px-6 py-2 rounded-full transition-all flex items-center gap-2 group"
@@ -1417,7 +1663,7 @@ const AnalysisView = ({ user, userData, setView, setActiveVideo }) => {
                     <div className="flex items-center gap-2">
                       <img 
                         src={session.videoId ? `https://img.youtube.com/vi/${session.videoId}/mqdefault.jpg` : "https://via.placeholder.com/120x68/000000/FFFFFF?text=No+Thumb"} 
-                        alt="Thumbnail" 
+                        alt={`Thumbnail for ${session.task}`} 
                         className="w-16 h-9 object-cover rounded border border-slate-800 opacity-80 hover:opacity-100 cursor-pointer"
                         onClick={() => handleRewatch(session)}
                       />
@@ -1427,6 +1673,7 @@ const AnalysisView = ({ user, userData, setView, setActiveVideo }) => {
                     onClick={() => handleDelete(session.id)} 
                     className="p-2 text-slate-600 hover:text-red-500 hover:bg-red-950/30 rounded-full transition-colors"
                     title="Delete Record"
+                    aria-label="Delete Session"
                   >
                     <Trash2 className="w-4 h-4" />
                   </button>
@@ -1451,6 +1698,8 @@ const StatCard = ({ label, value, sub, color }) => (
 const NavBtn = ({ icon: Icon, label, active, onClick }) => (
   <button 
     onClick={onClick}
+    aria-label={label}
+    aria-current={active ? 'page' : undefined}
     className={`flex flex-col items-center gap-1 p-2 w-16 rounded-xl transition-all ${
       active ? 'text-emerald-400 bg-emerald-950/50' : 'text-slate-500 hover:text-slate-300'
     }`}
