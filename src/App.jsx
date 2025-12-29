@@ -188,7 +188,7 @@ const AuthGate = ({ children }) => {
     updateSEO(
       "SSC CGL Command Center | Best AI Preparation App 2025",
       "Boost your SSC CGL preparation with AI-powered study plans, mock tests, and discipline tracking. The ultimate tool for government job aspirants.",
-      "SSC CGL, SSC CGL 2025, SSC CGL App, AI Study Planner, Mock Test Generator, Government Job Preparation, SSC CHSL, SSC MTS",
+      "SSC CGL Command Center, SSC CGL AI Planner, SSC CGL 2025, Best App for SSC CGL, Free Mock Test Generator, Government Job Preparation",
       {
         "@context": "https://schema.org",
         "@type": "SoftwareApplication",
@@ -297,8 +297,13 @@ const AuthGate = ({ children }) => {
             </div>
           </div>
           <p className="text-xs text-slate-600">
-            Optimize your preparation for SSC CGL 2024-2025. Covers Quantitative Aptitude, General Intelligence & Reasoning, English Comprehension, and General Awareness. The ultimate tool for government job aspirants.
+            Optimize your preparation for SSC CGL 2024-2025. Covers Quantitative Aptitude, General Intelligence & Reasoning, English Comprehension, and General Awareness.
           </p>
+          <div className="pt-4 border-t border-slate-800/50">
+             <p className="text-[10px] text-slate-500 font-mono">
+               SEARCH KEYWORDS: <span className="text-emerald-500">SSC CGL Command Center</span> • <span className="text-emerald-500">SSC CGL AI Planner</span> • <span className="text-emerald-500">Free Mock Test</span>
+             </p>
+          </div>
         </div>
       </div>
     );
