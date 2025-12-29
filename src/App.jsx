@@ -121,25 +121,50 @@ const generateAIResponse = async (prompt, systemInstruction) => {
 const updateSEO = (title, description, keywords, jsonLd) => {
   document.title = title;
   
-  // Update Meta Description
-  let metaDesc = document.querySelector("meta[name='description']");
-  if (!metaDesc) {
-    metaDesc = document.createElement("meta");
-    metaDesc.name = "description";
-    document.head.appendChild(metaDesc);
-  }
-  metaDesc.content = description;
+  // Helper to update or create meta tag
+  const setMeta = (name, content) => {
+    let element = document.querySelector(`meta[name='${name}']`);
+    if (!element) {
+      element = document.createElement("meta");
+      element.name = name;
+      document.head.appendChild(element);
+    }
+    element.content = content;
+  };
 
-  // Update Meta Keywords
-  let metaKeywords = document.querySelector("meta[name='keywords']");
-  if (!metaKeywords) {
-    metaKeywords = document.createElement("meta");
-    metaKeywords.name = "keywords";
-    document.head.appendChild(metaKeywords);
-  }
-  metaKeywords.content = keywords;
+  // Helper for OG tags (Social & Search Rich Results)
+  const setOg = (property, content) => {
+    let element = document.querySelector(`meta[property='${property}']`);
+    if (!element) {
+      element = document.createElement("meta");
+      element.setAttribute("property", property);
+      document.head.appendChild(element);
+    }
+    element.content = content;
+  };
 
-  // Update JSON-LD (Structured Data for Google)
+  setMeta("description", description);
+  setMeta("keywords", keywords);
+  setMeta("robots", "index, follow"); // CRITICAL: Tells Google to index this page
+  setMeta("author", "SSC CGL Command Center");
+
+  // Open Graph Tags (Helps in ranking and sharing)
+  setOg("og:title", title);
+  setOg("og:description", description);
+  setOg("og:type", "website");
+  setOg("og:url", window.location.href);
+  setOg("og:site_name", "SSC CGL Command Center");
+
+  // Canonical URL (Prevents duplicate content issues)
+  let linkCanonical = document.querySelector("link[rel='canonical']");
+  if (!linkCanonical) {
+    linkCanonical = document.createElement("link");
+    linkCanonical.rel = "canonical";
+    document.head.appendChild(linkCanonical);
+  }
+  linkCanonical.href = window.location.href;
+
+  // JSON-LD (Structured Data)
   let scriptJson = document.querySelector("script[type='application/ld+json']");
   if (!scriptJson) {
     scriptJson = document.createElement("script");
@@ -159,6 +184,21 @@ const AuthGate = ({ children }) => {
   const [authError, setAuthError] = useState('');
 
   useEffect(() => {
+    // IMMEDIATE SEO FOR LANDING PAGE (What Google sees first)
+    updateSEO(
+      "SSC CGL Command Center | Best AI Preparation App 2025",
+      "Boost your SSC CGL preparation with AI-powered study plans, mock tests, and discipline tracking. The ultimate tool for government job aspirants.",
+      "SSC CGL, SSC CGL 2025, SSC CGL App, AI Study Planner, Mock Test Generator, Government Job Preparation, SSC CHSL, SSC MTS",
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "SSC CGL Command Center",
+        "applicationCategory": "EducationalApplication",
+        "operatingSystem": "Web",
+        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "INR" }
+      }
+    );
+
     return onAuthStateChanged(auth, (u) => {
       setUser(u);
       setLoading(false);
