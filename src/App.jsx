@@ -54,7 +54,9 @@ import {
   Scan,
   Youtube,
   Trash2,
-  Languages
+  Languages,
+  RefreshCw,
+  Volume2
 } from 'lucide-react';
 
 // --- CONFIGURATION ---
@@ -392,6 +394,11 @@ const Dashboard = ({ user }) => {
         desc: "Get AI-driven insights on your study habits and test performance. Identify weak areas in Quant and English.",
         keywords: "Exam Analysis, Performance Tracker, AI Education Coach"
       },
+      vocabulary: {
+        title: "Vocabulary Builder | SSC CGL English",
+        desc: "Learn high-frequency SSC CGL vocabulary with Hindi meanings and examples using AI.",
+        keywords: "SSC CGL Vocabulary, English Vocab, Daily Words, Government Exam English"
+      }
     };
 
     const current = viewMeta[view] || viewMeta.dashboard;
@@ -468,6 +475,7 @@ const Dashboard = ({ user }) => {
       case 'focus': return <FocusMode user={user} scheduleRef={scheduleRef} todaySchedule={todaySchedule} setView={setView} userData={userData} userRef={userRef} activeVideo={activeVideo} setActiveVideo={setActiveVideo} activeTaskIndex={activeTaskIndex} setActiveTaskIndex={setActiveTaskIndex} handleGeneratePlan={handleGeneratePlan} generating={generating} />;
       case 'test': return <TestMode user={user} activeTest={activeTest} setView={setView} userRef={userRef} />;
       case 'analysis': return <AnalysisView user={user} userData={userData} setView={setView} setActiveVideo={setActiveVideo} />;
+      case 'vocabulary': return <VocabularyView user={user} setView={setView} setActiveTest={setActiveTest} />;
       default: return <HomeView user={user} userData={userData} todaySchedule={todaySchedule} setView={setView} scheduleRef={scheduleRef} />;
     }
   };
@@ -499,6 +507,14 @@ const Dashboard = ({ user }) => {
                 {userData.disciplineScore}%
               </div>
             )}
+            <button 
+              onClick={() => setView('vocabulary')}
+              className="flex items-center gap-1 px-2 py-1 hover:bg-slate-800 rounded transition-colors"
+              title="Vocabulary Builder"
+            >
+              <Languages className="w-4 h-4 text-violet-500" />
+              <span className="text-xs font-bold text-violet-400">Vocab</span>
+            </button>
             <button 
               onClick={() => signOut(auth)} 
               className="p-1 hover:bg-slate-800 rounded-full transition-colors"
@@ -1088,6 +1104,7 @@ const HomeView = ({ user, userData, todaySchedule, setView, scheduleRef, setActi
   return (
     <div className="p-4 space-y-6 pb-24">
       <QuoteSection />
+
       <div className="grid grid-cols-2 gap-4">
         <div className="bg-slate-900 p-4 rounded-xl border border-slate-800 relative overflow-hidden">
           <div className="absolute top-0 right-0 p-2 opacity-10">
@@ -1604,6 +1621,194 @@ const FocusMode = ({ user, scheduleRef, todaySchedule, setView, userData, userRe
           {isActive ? "Do not leave this screen. The AI is watching your focus." : "Timer Paused. Discipline mode active."}
         </p>
       </div>
+    </div>
+  );
+};
+
+// --- VIEW: VOCABULARY BUILDER ---
+const VocabularyView = ({ user, setView, setActiveTest }) => {
+  const [currentVocab, setCurrentVocab] = useState([]);
+  const [history, setHistory] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [viewMode, setViewMode] = useState('current'); // 'current' | 'history'
+
+  useEffect(() => {
+    const savedHistory = localStorage.getItem(`vocab_history_${user.uid}`);
+    if (savedHistory) {
+      setHistory(JSON.parse(savedHistory));
+    }
+  }, [user]);
+
+  const fetchNewWords = async () => {
+    setLoading(true);
+    const systemPrompt = `You are an expert English teacher for SSC CGL exams.
+    Generate 20 important, high-frequency vocabulary words.
+    Format: Strictly a JSON Array of objects.
+    Each object must have:
+    - "word": The word (String)
+    - "hindi": Hindi meaning (String)
+    - "type": Part of speech (String)
+    - "meaning": Short English definition (String)
+    Example: [{"word": "Diligent", "hindi": "मेहनती", "type": "Adj", "meaning": "Having or showing care and conscientiousness in one's work or duties."}]`;
+
+    try {
+      const rawText = await generateAIResponse("Give me 20 new words.", systemPrompt);
+      const jsonMatch = rawText.match(/\[.*\]/s);
+      if (jsonMatch) {
+        const newWords = safeJSONParse(jsonMatch[0]);
+        if (newWords && Array.isArray(newWords)) {
+          setCurrentVocab(newWords);
+          
+          // Update History
+          const updatedHistory = [...newWords, ...history];
+          // Remove duplicates based on 'word'
+          const uniqueHistory = updatedHistory.filter((v,i,a)=>a.findIndex(t=>(t.word.toLowerCase() === v.word.toLowerCase()))===i);
+          
+          setHistory(uniqueHistory);
+          localStorage.setItem(`vocab_history_${user.uid}`, JSON.stringify(uniqueHistory));
+        }
+      }
+    } catch (error) {
+      console.error("Vocab Error:", error);
+      alert("Failed to fetch words. Try again.");
+    }
+    setLoading(false);
+  };
+
+  const speak = (text) => {
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(text);
+    window.speechSynthesis.speak(utterance);
+  };
+
+  const startHistoryTest = async () => {
+    if (history.length === 0) return;
+    setLoading(true);
+    
+    const wordList = history.map(h => h.word).join(", ");
+    const qCount = history.length;
+
+    const systemPrompt = `You are an SSC CGL Exam Setter.
+    Create a Mock Test JSON based on these vocabulary words.
+    Generate exactly ${qCount} questions (1 question for each word provided).
+    Questions should test Synonyms, Antonyms, or Meanings.
+    
+    Format: Strictly a JSON Object with a "questions" array.
+    Each question object:
+    - id (number)
+    - question_en (String)
+    - options_en (Array of 4 strings)
+    - correctIndex (0-3)
+    - explanation_en (String)
+    
+    Return ONLY valid JSON.`;
+
+    try {
+      const rawText = await generateAIResponse(`Words: ${wordList}`, systemPrompt);
+      const jsonMatch = rawText.match(/\{.*\}/s);
+      if (jsonMatch) {
+        const data = safeJSONParse(jsonMatch[0]);
+        if (data && data.questions) {
+          setActiveTest({
+            title: `Vocab Revision: ${qCount} Words`,
+            questions: data.questions,
+            duration: Math.max(300, qCount * 60) // 1 min per question or min 5 mins
+          });
+          setView('test');
+        }
+      }
+    } catch (e) {
+      console.error(e);
+      alert("Failed to generate test.");
+    }
+    setLoading(false);
+  };
+
+  return (
+    <div className="p-4 space-y-6 pb-24">
+      <div className="flex items-center justify-between">
+        <h2 className="text-xl font-bold flex items-center gap-2">
+          <Languages className="w-5 h-5 text-violet-500" />
+          Vocab Builder
+        </h2>
+        <div className="flex bg-slate-900 rounded-lg p-1 border border-slate-800">
+          <button onClick={() => setViewMode('current')} className={`px-3 py-1 text-xs rounded-md transition-colors ${viewMode === 'current' ? 'bg-violet-600 text-white' : 'text-slate-400'}`}>Daily</button>
+          <button onClick={() => setViewMode('history')} className={`px-3 py-1 text-xs rounded-md transition-colors ${viewMode === 'history' ? 'bg-violet-600 text-white' : 'text-slate-400'}`}>History</button>
+        </div>
+      </div>
+
+      {viewMode === 'current' && (
+        <div className="space-y-4">
+          <div className="bg-slate-900 border border-slate-800 p-6 rounded-xl text-center">
+            <p className="text-slate-400 text-sm mb-4">Learn 20 new words daily to crack SSC CGL.</p>
+            <button 
+              onClick={fetchNewWords}
+              disabled={loading}
+              className="bg-violet-600 hover:bg-violet-500 text-white px-6 py-2 rounded-lg font-bold flex items-center gap-2 mx-auto transition-colors"
+            >
+              {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+              {currentVocab.length > 0 ? "Fetch More Words" : "Start Learning"}
+            </button>
+          </div>
+
+          <div className="space-y-3">
+            {currentVocab.map((item, idx) => (
+              <div key={idx} className="bg-slate-900 border border-slate-800 p-4 rounded-xl animate-in slide-in-from-bottom-2">
+                <div className="flex justify-between items-start">
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-lg font-bold text-white">{item.word}</h3>
+                    <button 
+                      onClick={() => speak(item.word)}
+                      className="p-1 text-slate-400 hover:text-emerald-400 hover:bg-slate-800 rounded-full transition-colors"
+                    >
+                      <Volume2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                  <span className="text-[10px] bg-slate-800 text-slate-400 px-2 py-1 rounded uppercase">{item.type}</span>
+                </div>
+                <p className="text-violet-400 font-bold text-sm mt-1">{item.hindi}</p>
+                <p className="text-slate-400 text-xs mt-2 italic">"{item.meaning}"</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {viewMode === 'history' && (
+        <div className="space-y-3">
+          {history.length > 0 && (
+            <button 
+              onClick={startHistoryTest}
+              disabled={loading}
+              className="w-full bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white p-3 rounded-xl font-bold flex items-center justify-center gap-2 shadow-lg mb-4 transition-all"
+            >
+              {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileQuestion className="w-4 h-4" />}
+              Take Test on All {history.length} Words
+            </button>
+          )}
+          {history.length === 0 ? (
+            <div className="text-center text-slate-500 py-10">No history yet.</div>
+          ) : (
+            history.map((item, idx) => (
+              <div key={idx} className="bg-slate-900 border border-slate-800 p-3 rounded-lg flex flex-col">
+                <div className="flex justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-slate-200">{item.word}</span>
+                    <button 
+                      onClick={() => speak(item.word)}
+                      className="p-1 text-slate-500 hover:text-emerald-400 hover:bg-slate-800 rounded-full transition-colors"
+                    >
+                      <Volume2 className="w-3 h-3" />
+                    </button>
+                  </div>
+                  <span className="text-violet-400 text-sm">{item.hindi}</span>
+                </div>
+                <span className="text-slate-500 text-xs mt-1">{item.meaning}</span>
+              </div>
+            ))
+          )}
+        </div>
+      )}
     </div>
   );
 };
