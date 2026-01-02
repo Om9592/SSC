@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Languages, ChevronDown } from 'lucide-react';
+import { Languages, ChevronDown, Volume2 } from 'lucide-react';
 
 const gitaQuotes = [
   "कर्मण्येवाधिकारस्ते मा फलेषु कदाचन। मा कर्मफलहेतुर्भूर्मा ते सङ्गोऽस्त्वकर्मणि॥",
@@ -49,6 +49,23 @@ const QuoteSection = () => {
     setGitaIndex(index);
     setGitaQuote(gitaQuotes[index]);
 
+    // Auto-play Gita Quote on Login/First Load
+    if (!sessionStorage.getItem('gita_welcome_played')) {
+      window.speechSynthesis.cancel();
+      
+      const shlok = new SpeechSynthesisUtterance(gitaQuotes[index]);
+      shlok.lang = 'hi-IN'; 
+      shlok.rate = 0.8;
+      window.speechSynthesis.speak(shlok);
+
+      const meaning = new SpeechSynthesisUtterance("अर्थात " + gitaTranslations.hi[index]);
+      meaning.lang = 'hi-IN';
+      meaning.rate = 0.9;
+      window.speechSynthesis.speak(meaning);
+
+      sessionStorage.setItem('gita_welcome_played', 'true');
+    }
+
     const motivationalIndex = Math.floor(Math.random() * motivationalQuotes.length);
     setMotivationalQuote(motivationalQuotes[motivationalIndex]);
   }, []);
@@ -59,6 +76,14 @@ const QuoteSection = () => {
 
   const handleTranslate = () => {
     setIsTranslated(!isTranslated);
+  };
+
+  const speakQuote = () => {
+    const text = isTranslated ? translatedGitaQuote : gitaQuote;
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = isTranslated && selectedLanguage === 'en' ? 'en-US' : 'hi-IN';
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.speak(utterance);
   };
 
   return (
@@ -80,6 +105,10 @@ const QuoteSection = () => {
                 <option value="hi">Hindi</option>
               </select>
             )}
+            <button onClick={speakQuote} className="text-slate-400 hover:text-white transition-colors flex items-center gap-1 text-xs">
+              <Volume2 size={14} />
+              <span>Listen</span>
+            </button>
             <button onClick={handleTranslate} className="text-slate-400 hover:text-white transition-colors flex items-center gap-1 text-xs">
               <Languages size={14} />
               <span>{isTranslated ? 'Original' : 'Translate'}</span>

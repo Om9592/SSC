@@ -516,7 +516,10 @@ const Dashboard = ({ user }) => {
               <span className="text-xs font-bold text-violet-400">Vocab</span>
             </button>
             <button 
-              onClick={() => signOut(auth)} 
+              onClick={() => {
+                sessionStorage.removeItem('gita_welcome_played'); // Reset welcome audio flag
+                signOut(auth);
+              }} 
               className="p-1 hover:bg-slate-800 rounded-full transition-colors"
               title="Logout"
               aria-label="Sign Out"
