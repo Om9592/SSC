@@ -25,6 +25,7 @@ import {
   addDoc,
   deleteDoc
 } from 'firebase/firestore';
+import QuoteSection from "./QuoteSection.jsx";
 import { 
   Shield, 
   Brain, 
@@ -74,8 +75,8 @@ const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
-const db = getFirestore(app);
-const appId = "ssc-cgl-v1";
+export const db = getFirestore(app);
+export const appId = "ssc-cgl-v1";
 
 // --- UTILS ---
 const safeJSONParse = (str) => {
@@ -390,7 +391,7 @@ const Dashboard = ({ user }) => {
         title: "Performance Analysis | AI Coach", 
         desc: "Get AI-driven insights on your study habits and test performance. Identify weak areas in Quant and English.",
         keywords: "Exam Analysis, Performance Tracker, AI Education Coach"
-      }
+      },
     };
 
     const current = viewMeta[view] || viewMeta.dashboard;
@@ -1086,6 +1087,7 @@ const HomeView = ({ user, userData, todaySchedule, setView, scheduleRef, setActi
 
   return (
     <div className="p-4 space-y-6 pb-24">
+      <QuoteSection />
       <div className="grid grid-cols-2 gap-4">
         <div className="bg-slate-900 p-4 rounded-xl border border-slate-800 relative overflow-hidden">
           <div className="absolute top-0 right-0 p-2 opacity-10">
