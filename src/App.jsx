@@ -541,7 +541,7 @@ const Dashboard = ({ user }) => {
       case 'test': return <TestMode user={user} activeTest={activeTest} setView={setView} userRef={userRef} />;
       case 'analysis': return <AnalysisView user={user} userData={userData} setView={setView} setActiveVideo={setActiveVideo} />;
       case 'vocabulary': return <VocabularyView user={user} setView={setView} setActiveTest={setActiveTest} />;
-      case 'practice': return <PracticeMode user={user} setView={setView} />;
+      case 'practice': return <CBTPracticeMode user={user} setView={setView} setActiveTest={setActiveTest} />;
       default: return <HomeView user={user} userData={userData} todaySchedule={todaySchedule} setView={setView} scheduleRef={scheduleRef} />;
     }
   };
@@ -926,9 +926,11 @@ const LibraryView = ({ user, setView, setActiveTest }) => {
 const TestMode = ({ user, activeTest, setView, userRef }) => {
   const [currentQIndex, setCurrentQIndex] = useState(0);
   const [responses, setResponses] = useState({});
+  const [markedForReview, setMarkedForReview] = useState({});
   const [timeLeft, setTimeLeft] = useState(activeTest?.duration || 600);
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [score, setScore] = useState(0);
+  const [correctCount, setCorrectCount] = useState(0);
   const [breaches, setBreaches] = useState(0);
   const [language, setLanguage] = useState('en');
   const responsesRef = useRef(responses);
@@ -937,15 +939,31 @@ const TestMode = ({ user, activeTest, setView, userRef }) => {
   responsesRef.current = responses;
   breachesRef.current = breaches;
 
-  const handleSubmit = useCallback(async () => {
+  const handleSubmit = useCallback(async (confirmSubmission = true) => {
     if (submittedRef.current) return;
+    const unanswered = activeTest.questions.length - Object.keys(responsesRef.current).length;
+    if (confirmSubmission && !window.confirm(
+      unanswered > 0
+        ? `You have ${unanswered} unanswered question${unanswered === 1 ? '' : 's'}. Submit the test anyway?`
+        : 'Submit your test now?'
+    )) return;
+
     submittedRef.current = true;
     setIsSubmitted(true);
     let rawScore = 0;
+    let correct = 0;
     activeTest.questions.forEach((q, idx) => {
-      if (responsesRef.current[idx] === q.correctIndex) rawScore++;
+      const selectedAnswer = responsesRef.current[idx];
+      if (selectedAnswer === q.correctIndex) {
+        rawScore += activeTest.markingScheme?.correct ?? 1;
+        correct += 1;
+      } else if (selectedAnswer !== undefined) {
+        rawScore -= activeTest.markingScheme?.incorrect ?? 0;
+      }
     });
+    rawScore = Number(rawScore.toFixed(2));
     setScore(rawScore);
+    setCorrectCount(correct);
 
     try {
       const sessionRef = doc(collection(db, 'artifacts', appId, 'users', user.uid, 'test_results'));
@@ -953,6 +971,8 @@ const TestMode = ({ user, activeTest, setView, userRef }) => {
         testTitle: activeTest.title,
         score: rawScore,
         total: activeTest.questions.length,
+        correct,
+        maxScore: activeTest.questions.length * (activeTest.markingScheme?.correct ?? 1),
         breaches: breachesRef.current,
         timestamp: new Date().toISOString()
       });
@@ -965,7 +985,7 @@ const TestMode = ({ user, activeTest, setView, userRef }) => {
   useEffect(() => {
     if (isSubmitted) return;
     if (timeLeft <= 0) {
-      handleSubmit();
+      handleSubmit(false);
       return;
     }
     const timer = setTimeout(() => setTimeLeft(time => Math.max(0, time - 1)), 1000);
@@ -1050,7 +1070,7 @@ const TestMode = ({ user, activeTest, setView, userRef }) => {
           )}
           {isSubmitted && (
             <button 
-              onClick={() => setView('library')}
+              onClick={() => setView(activeTest.returnView || 'library')}
               className="bg-slate-700 hover:bg-slate-600 text-white px-4 py-1.5 rounded text-sm font-bold"
             >
               EXIT
@@ -1066,7 +1086,15 @@ const TestMode = ({ user, activeTest, setView, userRef }) => {
               <div className="bg-slate-900 border border-slate-800 p-8 rounded-2xl text-center">
                 <CheckSquare className="w-16 h-16 text-emerald-500 mx-auto mb-4" />
                 <h2 className="text-3xl font-bold text-white mb-2">Test Submitted</h2>
-                <div className="text-6xl font-black text-emerald-400 mb-2">{score} / {activeTest.questions.length}</div>
+                <div className="text-6xl font-black text-emerald-400 mb-2">
+                  {score} / {activeTest.questions.length * (activeTest.markingScheme?.correct ?? 1)}
+                </div>
+                <p className="text-slate-400 mb-2">
+                  {correctCount} correct Â· {Object.keys(responses).length - correctCount} incorrect Â· {activeTest.questions.length - Object.keys(responses).length} unanswered
+                </p>
+                {activeTest.markingScheme && (
+                  <p className="text-slate-500 text-sm mb-2">Correct: +{activeTest.markingScheme.correct} Â· Incorrect: âˆ’{activeTest.markingScheme.incorrect}</p>
+                )}
                 <p className="text-slate-500">Discipline Breaches: <span className="text-red-500 font-bold">{breaches}</span></p>
               </div>
 
@@ -1165,9 +1193,11 @@ const TestMode = ({ user, activeTest, setView, userRef }) => {
                 className={`h-10 rounded font-bold text-sm transition-colors ${
                   currentQIndex === idx 
                     ? 'ring-2 ring-white bg-slate-800'
+                  : markedForReview[idx]
+                    ? 'bg-violet-600 text-white'
                     : responses[idx] !== undefined
-                      ? 'bg-emerald-600 text-white' 
-                      : 'bg-slate-800 text-slate-500'
+                    ? 'bg-emerald-600 text-white'
+                    : 'bg-slate-800 text-slate-500'
                 }`}
               >
                 {idx + 1}
@@ -1180,24 +1210,36 @@ const TestMode = ({ user, activeTest, setView, userRef }) => {
               <div className="w-3 h-3 bg-emerald-600 rounded" /> Answered
             </div>
             <div className="flex items-center gap-2 text-xs text-slate-400">
+              <div className="w-3 h-3 bg-violet-600 rounded" /> Marked for review
+            </div>
+            <div className="flex items-center gap-2 text-xs text-slate-400">
               <div className="w-3 h-3 bg-slate-800 rounded" /> Not Answered
             </div>
           </div>
         </div>
       </div>
 
-      <div className="h-16 bg-slate-900 border-t border-slate-800 flex items-center justify-between px-6">
+      <div className="h-16 bg-slate-900 border-t border-slate-800 flex items-center justify-between gap-2 px-2 sm:px-6">
+        {!isSubmitted && (
+          <button
+            onClick={() => setMarkedForReview(current => ({ ...current, [currentQIndex]: !current[currentQIndex] }))}
+            className={`px-2 sm:px-3 py-2 rounded-lg text-xs sm:text-sm font-bold ${markedForReview[currentQIndex] ? 'bg-violet-700 text-white' : 'bg-slate-800 text-slate-300'}`}
+          >
+            <span className="hidden sm:inline">{markedForReview[currentQIndex] ? 'Unmark Review' : 'Mark for Review'}</span>
+            <span className="sm:hidden">{markedForReview[currentQIndex] ? 'Unmark' : 'Review'}</span>
+          </button>
+        )}
         <button 
           onClick={() => setCurrentQIndex(Math.max(0, currentQIndex - 1))}
           disabled={currentQIndex === 0}
-          className="px-4 py-2 bg-slate-800 rounded-lg text-slate-300 disabled:opacity-50"
+          className="px-3 sm:px-4 py-2 bg-slate-800 rounded-lg text-sm text-slate-300 disabled:opacity-50"
         >
           Previous
         </button>
         <button 
           onClick={() => setCurrentQIndex(Math.min(activeTest.questions.length - 1, currentQIndex + 1))}
           disabled={currentQIndex === activeTest.questions.length - 1}
-          className="px-6 py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-lg disabled:opacity-50"
+          className="px-3 sm:px-6 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-bold rounded-lg disabled:opacity-50"
         >
           Save & Next
         </button>
@@ -1994,6 +2036,182 @@ const PracticeMode = ({ user, setView }) => {
               Next Question
             </button>
           </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+const CBTPracticeMode = ({ user, setView, setActiveTest }) => {
+  const [questionCount, setQuestionCount] = useState(10);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const previousQuestionsRef = useRef([]);
+  const questionsLoadedRef = useRef(false);
+  const questionSequenceRef = useRef(0);
+
+  const startMockTest = async () => {
+    setLoading(true);
+    setError('');
+
+    const historyKey = `practice_question_history_${user.uid}`;
+    if (!questionsLoadedRef.current) {
+      try {
+        const history = safeJSONParse(localStorage.getItem(historyKey));
+        if (Array.isArray(history)) {
+          previousQuestionsRef.current = history
+            .filter(sentence => typeof sentence === 'string')
+            .slice(-10);
+        }
+      } catch (storageError) {
+        console.error("Could not load previous practice questions:", storageError);
+      }
+      questionsLoadedRef.current = true;
+    }
+
+    const topics = [
+      "subject-verb agreement",
+      "articles and determiners",
+      "prepositions",
+      "tenses and verb forms",
+      "pronouns",
+      "conjunctions",
+      "adjectives and adverbs",
+      "parallelism and sentence structure",
+      "modifiers",
+      "conditional sentences"
+    ];
+    const topicSequence = Array.from({ length: questionCount }, (_, index) =>
+      topics[(questionSequenceRef.current + index) % topics.length]
+    );
+    questionSequenceRef.current += questionCount;
+
+    const systemPrompt = `You are an expert SSC CGL English exam question setter.
+Generate EXACTLY ${questionCount} distinct CBT-style Error Detection questions. Use these grammar topics in order: ${topicSequence.join(', ')}.
+Split every sentence into exactly 3 parts. Option D is always "No Error".
+Return ONLY this JSON shape, with no markdown:
+{"questions":[{"sentence":"Part 1 / Part 2 / Part 3.","parts":["Part 1","Part 2","Part 3"],"errorIndex":1,"explanation_en":"Brief rule and correction.","explanation_hi":"à¤¸à¤‚à¤•à¥à¤·à¤¿à¤ªà¥à¤¤ à¤¹à¤¿à¤‚à¤¦à¥€ à¤¨à¤¿à¤¯à¤® à¤”à¤° à¤¸à¥à¤§à¤¾à¤°à¥¤"}]}
+Each errorIndex must be 0, 1, 2, or 3 (3 means No Error). Make every sentence and tested grammar point different within this test. Keep both explanations concise.`;
+
+    try {
+      const recentQuestions = previousQuestionsRef.current.length
+        ? ` Avoid reusing or closely paraphrasing these recent questions: ${JSON.stringify(previousQuestionsRef.current)}.`
+        : "";
+      const rawText = await generateAIResponse(
+        `Create a new ${questionCount}-question SSC CGL CBT mock test. Variation: ${crypto.randomUUID()}.${recentQuestions}`,
+        systemPrompt
+      );
+      const data = safeJSONParse(rawText);
+      const questions = data?.questions;
+      const isValidQuestion = question => typeof question?.sentence === 'string'
+        && question.sentence.trim().length > 0
+        && Array.isArray(question.parts)
+        && question.parts.length === 3
+        && question.parts.every(part => typeof part === 'string' && part.trim().length > 0)
+        && Number.isInteger(question.errorIndex)
+        && question.errorIndex >= 0
+        && question.errorIndex <= 3
+        && typeof question.explanation_en === 'string'
+        && typeof question.explanation_hi === 'string';
+      const uniqueSentences = new Set(
+        Array.isArray(questions)
+          ? questions.map(question => question.sentence?.trim().toLowerCase().replace(/\s+/g, ' '))
+          : []
+      );
+
+      if (!Array.isArray(questions)
+        || questions.length !== questionCount
+        || !questions.every(isValidQuestion)
+        || uniqueSentences.size !== questionCount) {
+        throw new Error(`Could not create ${questionCount} distinct valid questions. Please try again.`);
+      }
+
+      const testQuestions = questions.map(question => ({
+        question_en: question.sentence,
+        options_en: [...question.parts, 'No Error'],
+        correctIndex: question.errorIndex,
+        explanation_en: question.explanation_en,
+        explanation_hi: question.explanation_hi
+      }));
+      previousQuestionsRef.current = [
+        ...previousQuestionsRef.current,
+        ...questions.map(question => question.sentence)
+      ].slice(-10);
+      try {
+        localStorage.setItem(historyKey, JSON.stringify(previousQuestionsRef.current));
+      } catch (storageError) {
+        console.error("Could not save practice question history:", storageError);
+      }
+
+      setActiveTest({
+        title: `SSC CGL Error Detection Mock Test (${questionCount} Questions)`,
+        questions: testQuestions,
+        duration: questionCount * 60,
+        markingScheme: { correct: 2, incorrect: 0.5 },
+        returnView: 'practice'
+      });
+      setView('test');
+    } catch (requestError) {
+      console.error("Could not generate practice mock test:", requestError);
+      setError(requestError.message || "Could not generate the mock test. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="p-4 space-y-6 pb-24">
+      <div className="flex items-center justify-between">
+        <h2 className="text-xl font-bold flex items-center gap-2">
+          <FilePenLine className="w-5 h-5 text-emerald-500" />
+          SSC CGL CBT Practice
+        </h2>
+      </div>
+
+      {loading ? (
+        <div className="flex flex-col items-center justify-center py-16 space-y-3">
+          <Loader2 className="w-8 h-8 text-emerald-500 animate-spin" />
+          <p className="text-emerald-500 animate-pulse">Creating your {questionCount}-question mock test...</p>
+        </div>
+      ) : (
+        <div className="max-w-xl mx-auto bg-slate-900 border border-slate-800 rounded-2xl p-6 sm:p-8 space-y-6">
+          <div className="text-center space-y-2">
+            <h3 className="text-lg font-bold text-white">Create an Error Detection Mock Test</h3>
+            <p className="text-sm text-slate-400">Choose the number of questions. Your timed test opens in the CBT exam layout.</p>
+          </div>
+
+          <label className="block space-y-2">
+            <span className="text-sm font-bold text-slate-300">Number of questions</span>
+            <select
+              value={questionCount}
+              onChange={event => setQuestionCount(Number(event.target.value))}
+              className="w-full bg-slate-950 border border-slate-700 rounded-lg px-4 py-3 text-white focus:border-emerald-500 outline-none"
+            >
+              {[5, 10, 15, 20].map(count => (
+                <option key={count} value={count}>{count} questions Â· {count} minutes</option>
+              ))}
+            </select>
+          </label>
+
+          <div className="bg-slate-950 border border-slate-800 rounded-lg p-4 text-sm text-slate-400 space-y-1">
+            <p>â€¢ 1 minute per question</p>
+            <p>â€¢ Correct answer: +2 marks Â· Incorrect answer: âˆ’0.5 marks</p>
+            <p>â€¢ Move between questions, mark questions for review, then submit</p>
+          </div>
+
+          {error && (
+            <p role="alert" className="text-sm text-red-400 bg-red-950/40 border border-red-900 rounded-lg p-3">
+              {error}
+            </p>
+          )}
+
+          <button
+            onClick={startMockTest}
+            className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 px-6 rounded-lg flex items-center justify-center gap-2"
+          >
+            <FileQuestion className="w-4 h-4" />
+            Generate & Start Mock Test
+          </button>
         </div>
       )}
     </div>
