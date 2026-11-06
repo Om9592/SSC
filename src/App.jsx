@@ -1053,7 +1053,7 @@ const TestMode = ({ user, activeTest, setView, userRef }) => {
               aria-label="Switch Language"
             >
               <Languages className="w-3 h-3" />
-              {language === 'en' ? 'English' : 'à¤¹à¤¿à¤‚à¤¦à¥€'}
+              {language === 'en' ? 'English' : 'Hindi'}
             </button>
           )}
           <div className={`flex items-center gap-2 px-3 py-1 rounded font-mono font-bold ${timeLeft < 60 ? 'bg-red-900/50 text-red-500' : 'bg-slate-800 text-emerald-400'}`}>
@@ -1090,10 +1090,10 @@ const TestMode = ({ user, activeTest, setView, userRef }) => {
                   {score} / {activeTest.questions.length * (activeTest.markingScheme?.correct ?? 1)}
                 </div>
                 <p className="text-slate-400 mb-2">
-                  {correctCount} correct Â· {Object.keys(responses).length - correctCount} incorrect Â· {activeTest.questions.length - Object.keys(responses).length} unanswered
+                  {correctCount} correct | {Object.keys(responses).length - correctCount} incorrect | {activeTest.questions.length - Object.keys(responses).length} unanswered
                 </p>
                 {activeTest.markingScheme && (
-                  <p className="text-slate-500 text-sm mb-2">Correct: +{activeTest.markingScheme.correct} Â· Incorrect: âˆ’{activeTest.markingScheme.incorrect}</p>
+                  <p className="text-slate-500 text-sm mb-2">Correct: +{activeTest.markingScheme.correct} | Incorrect: -{activeTest.markingScheme.incorrect}</p>
                 )}
                 <p className="text-slate-500">Discipline Breaches: <span className="text-red-500 font-bold">{breaches}</span></p>
               </div>
@@ -1523,7 +1523,7 @@ const FocusMode = ({ user, scheduleRef, todaySchedule, setView, userData, userRe
     
       if (timeLeft > 60) {
         userUpdates.disciplineScore = increment(-5);
-        alert("âš ï¸ DISCIPLINE PENALTY: Session abandoned early! (-5 Points)");
+        alert("DISCIPLINE PENALTY: Session abandoned early! (-5 Points)");
       } else if (breaches === 0) {
         userUpdates.disciplineScore = increment(1);
       }
@@ -1627,7 +1627,7 @@ const FocusMode = ({ user, scheduleRef, todaySchedule, setView, userData, userRe
       {breaches > 0 && (
         <div className="bg-red-900/20 border-b border-red-900/50 p-2 text-center mt-12">
           <p className="text-red-500 text-xs font-bold animate-pulse">
-            âš ï¸ DISCIPLINE BREACH DETECTED: {breaches} | SCORE PENALIZED
+            DISCIPLINE BREACH DETECTED: {breaches} | SCORE PENALIZED
           </p>
         </div>
       )}
@@ -2090,7 +2090,7 @@ const CBTPracticeMode = ({ user, setView, setActiveTest }) => {
 Generate EXACTLY ${questionCount} distinct CBT-style Error Detection questions. Use these grammar topics in order: ${topicSequence.join(', ')}.
 Split every sentence into exactly 3 parts. Option D is always "No Error".
 Return ONLY this JSON shape, with no markdown:
-{"questions":[{"sentence":"Part 1 / Part 2 / Part 3.","parts":["Part 1","Part 2","Part 3"],"errorIndex":1,"explanation_en":"Brief rule and correction.","explanation_hi":"à¤¸à¤‚à¤•à¥à¤·à¤¿à¤ªà¥à¤¤ à¤¹à¤¿à¤‚à¤¦à¥€ à¤¨à¤¿à¤¯à¤® à¤”à¤° à¤¸à¥à¤§à¤¾à¤°à¥¤"}]}
+{"questions":[{"sentence":"Part 1 / Part 2 / Part 3.","parts":["Part 1","Part 2","Part 3"],"errorIndex":1,"explanation_en":"Brief rule and correction.","explanation_hi":"Brief Hindi translation of the rule and correction."}]}
 Each errorIndex must be 0, 1, 2, or 3 (3 means No Error). Make every sentence and tested grammar point different within this test. Keep both explanations concise.`;
 
     try {
@@ -2188,15 +2188,15 @@ Each errorIndex must be 0, 1, 2, or 3 (3 means No Error). Make every sentence an
               className="w-full bg-slate-950 border border-slate-700 rounded-lg px-4 py-3 text-white focus:border-emerald-500 outline-none"
             >
               {[5, 10, 15, 20].map(count => (
-                <option key={count} value={count}>{count} questions Â· {count} minutes</option>
+                <option key={count} value={count}>{count} questions - {count} minutes</option>
               ))}
             </select>
           </label>
 
           <div className="bg-slate-950 border border-slate-800 rounded-lg p-4 text-sm text-slate-400 space-y-1">
-            <p>â€¢ 1 minute per question</p>
-            <p>â€¢ Correct answer: +2 marks Â· Incorrect answer: âˆ’0.5 marks</p>
-            <p>â€¢ Move between questions, mark questions for review, then submit</p>
+            <p>- 1 minute per question</p>
+            <p>- Correct answer: +2 marks; incorrect answer: -0.5 marks</p>
+            <p>- Move between questions, mark questions for review, then submit</p>
           </div>
 
           {error && (
@@ -2250,7 +2250,7 @@ const VocabularyView = ({ user, setView, setActiveTest }) => {
     - "hindi": Hindi meaning (String)
     - "type": Part of speech (String)
     - "meaning": Short English definition (String)
-    Example: [{"word": "Diligent", "hindi": "à¤®à¥‡à¤¹à¤¨à¤¤à¥€", "type": "Adj", "meaning": "Having or showing care and conscientiousness in one's work or duties."}]`;
+    Example: [{"word": "Diligent", "hindi": "hardworking", "type": "Adj", "meaning": "Having or showing care and conscientiousness in one's work or duties."}]`;
 
     try {
       const rawText = await generateAIResponse("Give me 20 new words.", systemPrompt);
@@ -2515,7 +2515,7 @@ const AnalysisView = ({ user, userData, setView, setActiveVideo }) => {
                 <div className="flex-1 min-w-0 pr-3">
                   <p className="text-sm font-bold text-slate-200 truncate max-w-[200px]">{session.task}</p>
                   <p className="text-[10px] text-slate-500 flex items-center gap-2">
-                    {new Date(session.timestamp).toLocaleDateString()} â€¢ {session.duration} mins
+                    {new Date(session.timestamp).toLocaleDateString()} | {session.duration} mins
                     {session.videoId && <span className="text-emerald-500 flex items-center gap-1 bg-emerald-950/30 px-1.5 rounded"><Youtube className="w-3 h-3" /> Watched</span>}
                   </p>
                 </div>
