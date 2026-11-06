@@ -1033,7 +1033,7 @@ const TestMode = ({ user, activeTest, setView, userRef }) => {
               aria-label="Switch Language"
             >
               <Languages className="w-3 h-3" />
-              {language === 'en' ? 'English' : 'हिंदी'}
+              {language === 'en' ? 'English' : 'à¤¹à¤¿à¤‚à¤¦à¥€'}
             </button>
           )}
           <div className={`flex items-center gap-2 px-3 py-1 rounded font-mono font-bold ${timeLeft < 60 ? 'bg-red-900/50 text-red-500' : 'bg-slate-800 text-emerald-400'}`}>
@@ -1481,7 +1481,7 @@ const FocusMode = ({ user, scheduleRef, todaySchedule, setView, userData, userRe
     
       if (timeLeft > 60) {
         userUpdates.disciplineScore = increment(-5);
-        alert("⚠️ DISCIPLINE PENALTY: Session abandoned early! (-5 Points)");
+        alert("âš ï¸ DISCIPLINE PENALTY: Session abandoned early! (-5 Points)");
       } else if (breaches === 0) {
         userUpdates.disciplineScore = increment(1);
       }
@@ -1585,7 +1585,7 @@ const FocusMode = ({ user, scheduleRef, todaySchedule, setView, userData, userRe
       {breaches > 0 && (
         <div className="bg-red-900/20 border-b border-red-900/50 p-2 text-center mt-12">
           <p className="text-red-500 text-xs font-bold animate-pulse">
-            ⚠️ DISCIPLINE BREACH DETECTED: {breaches} | SCORE PENALIZED
+            âš ï¸ DISCIPLINE BREACH DETECTED: {breaches} | SCORE PENALIZED
           </p>
         </div>
       )}
@@ -1742,6 +1742,8 @@ const FocusMode = ({ user, scheduleRef, todaySchedule, setView, userData, userRe
 // --- VIEW: PRACTICE MODE ---
 const PracticeMode = ({ user, setView }) => {
   const [question, setQuestion] = useState(null);
+  const previousQuestionsRef = useRef([]);
+  const questionSequenceRef = useRef(0);
   const [loading, setLoading] = useState(false);
   const [userSelection, setUserSelection] = useState({ index: null, status: '' }); // status: 'correct', 'incorrect'
   const [showAnswer, setShowAnswer] = useState(false);
@@ -1756,8 +1758,38 @@ const PracticeMode = ({ user, setView }) => {
     setShowAnswer(false);
     if (timerId) clearInterval(timerId);
 
+    const historyKey = `practice_question_history_${user.uid}`;
+    if (previousQuestionsRef.current.length === 0) {
+      try {
+        const savedQuestions = safeJSONParse(localStorage.getItem(historyKey));
+        if (Array.isArray(savedQuestions)) {
+          previousQuestionsRef.current = savedQuestions.filter(item => typeof item === 'string').slice(-10);
+        }
+      } catch (error) {
+        console.error("Could not load previous practice questions:", error);
+      }
+    }
+
+    const topics = [
+      "subject-verb agreement",
+      "articles and determiners",
+      "prepositions",
+      "tenses and verb forms",
+      "pronouns",
+      "conjunctions",
+      "adjectives and adverbs",
+      "parallelism and sentence structure",
+      "modifiers",
+      "conditional sentences"
+    ];
+    const topic = topics[questionSequenceRef.current % topics.length];
+    questionSequenceRef.current += 1;
+    const previousQuestions = previousQuestionsRef.current;
+    const variationId = crypto.randomUUID();
+
     const systemPrompt = `You are an expert English Grammar teacher for the SSC CGL exam, specializing in Previous Year Questions (PYQs).
     Your task is to generate a single "Error Detection" question that is either an actual PYQ from an SSC exam (like CGL, CHSL, CPO) or is created in the exact style and difficulty of a real PYQ.
+    Focus this question on ${topic}. Make it substantially different in wording and grammar rule from the recent questions supplied by the user. Never repeat any of those questions.
     The sentence must be split into three parts. The fourth option is always "No Error".
     You must return a JSON object with the following structure:
     {
@@ -1772,9 +1804,30 @@ const PracticeMode = ({ user, setView }) => {
     `;
 
     try {
-      const rawText = await generateAIResponse("Generate a new SSC CGL previous year error detection question with Hindi explanation.", systemPrompt);
+      const recentQuestions = previousQuestions.length > 0
+        ? ` Avoid questions similar to these recent sentences: ${JSON.stringify(previousQuestions)}.`
+        : "";
+      const rawText = await generateAIResponse(
+        `Generate one new SSC CGL error-detection practice question with Hindi explanation. Request variation: ${variationId}.${recentQuestions}`,
+        systemPrompt
+      );
       const q = safeJSONParse(rawText);
-      if (q && q.sentence && q.parts && q.parts.length === 3 && q.hasOwnProperty('errorIndex') && q.explanation_en && q.explanation_hi) {
+      if (q
+        && typeof q.sentence === 'string'
+        && Array.isArray(q.parts)
+        && q.parts.length === 3
+        && q.parts.every(part => typeof part === 'string')
+        && Number.isInteger(q.errorIndex)
+        && q.errorIndex >= 0
+        && q.errorIndex <= 3
+        && typeof q.explanation_en === 'string'
+        && typeof q.explanation_hi === 'string') {
+        previousQuestionsRef.current = [...previousQuestions, q.sentence].slice(-10);
+        try {
+          localStorage.setItem(historyKey, JSON.stringify(previousQuestionsRef.current));
+        } catch (error) {
+          console.error("Could not save practice question history:", error);
+        }
         setQuestion(q);
         setTimeLeft(10); // Reset timer
       } else {
@@ -1979,7 +2032,7 @@ const VocabularyView = ({ user, setView, setActiveTest }) => {
     - "hindi": Hindi meaning (String)
     - "type": Part of speech (String)
     - "meaning": Short English definition (String)
-    Example: [{"word": "Diligent", "hindi": "मेहनती", "type": "Adj", "meaning": "Having or showing care and conscientiousness in one's work or duties."}]`;
+    Example: [{"word": "Diligent", "hindi": "à¤®à¥‡à¤¹à¤¨à¤¤à¥€", "type": "Adj", "meaning": "Having or showing care and conscientiousness in one's work or duties."}]`;
 
     try {
       const rawText = await generateAIResponse("Give me 20 new words.", systemPrompt);
@@ -2244,7 +2297,7 @@ const AnalysisView = ({ user, userData, setView, setActiveVideo }) => {
                 <div className="flex-1 min-w-0 pr-3">
                   <p className="text-sm font-bold text-slate-200 truncate max-w-[200px]">{session.task}</p>
                   <p className="text-[10px] text-slate-500 flex items-center gap-2">
-                    {new Date(session.timestamp).toLocaleDateString()} • {session.duration} mins
+                    {new Date(session.timestamp).toLocaleDateString()} â€¢ {session.duration} mins
                     {session.videoId && <span className="text-emerald-500 flex items-center gap-1 bg-emerald-950/30 px-1.5 rounded"><Youtube className="w-3 h-3" /> Watched</span>}
                   </p>
                 </div>
