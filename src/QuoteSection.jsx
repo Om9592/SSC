@@ -81,7 +81,7 @@ const QuoteSection = () => {
   const speakQuote = () => {
     const text = isTranslated ? translatedGitaQuote : gitaQuote;
     const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = isTranslated && selectedLanguage === 'en' ? 'en-US' : 'hi-IN';
+    utterance.lang = isTranslated && selectedLanguage === 'en' ? 'en-IN' : 'hi-IN';
     window.speechSynthesis.cancel();
     window.speechSynthesis.speak(utterance);
   };

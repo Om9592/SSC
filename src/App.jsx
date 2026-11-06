@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { initializeApp } from 'firebase/app';
 import { 
   getAuth, 
@@ -18,6 +18,7 @@ import {
   onSnapshot, 
   updateDoc, 
   increment,
+  writeBatch,
   arrayUnion,
   query,
   orderBy,
@@ -41,6 +42,7 @@ import {
   Activity,
   Target,
   LogOut,
+  FilePenLine,
   ArrowLeft,
   BookOpen,
   Plus,
@@ -75,9 +77,11 @@ const firebaseConfig = {
    measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID
 };
 
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-export const db = getFirestore(app);
+const requiredFirebaseKeys = ['apiKey', 'authDomain', 'projectId', 'appId'];
+const missingFirebaseKeys = requiredFirebaseKeys.filter(key => !firebaseConfig[key]);
+const app = missingFirebaseKeys.length === 0 ? initializeApp(firebaseConfig) : null;
+const auth = app ? getAuth(app) : null;
+export const db = app ? getFirestore(app) : null;
 export const appId = "ssc-cgl-v1";
 
 // --- UTILS ---
@@ -97,27 +101,54 @@ const safeJSONParse = (str) => {
 };
 
 // --- AI UTILS ---
-const generateAIResponse = async (prompt, systemInstruction) => {
-  const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
-  try {
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          systemInstruction: { parts: [{ text: systemInstruction }] },
-        }),
-      }
-    );
-    const data = await response.json();
-    if (data.error) throw new Error(data.error.message);
-    return data.candidates?.[0]?.content?.parts?.[0]?.text || "System Error: AI Unreachable.";
-  } catch (error) {
-    console.error("AI Error:", error);
-    return "Connection failed. Manual planning required.";
+const generateAIResponse = async (prompt, systemInstruction, inlineData) => {
+  if (!auth?.currentUser) {
+    throw new Error("Sign in again before using AI features.");
   }
+
+  const token = await auth.currentUser.getIdToken();
+  const response = await fetch("/api/ai", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${token}`,
+    },
+    body: JSON.stringify({ prompt, systemInstruction, inlineData }),
+    signal: AbortSignal.timeout(65000),
+  });
+  let data;
+  try {
+    data = await response.json();
+  } catch {
+    throw new Error(`AI service returned an unreadable response (${response.status}).`);
+  }
+  if (!response.ok) {
+    throw new Error(data.error || `AI service failed (${response.status}).`);
+  }
+  if (!data.text) {
+    throw new Error("AI service returned an empty response. Please try again.");
+  }
+  return data.text;
+};
+
+const getLocalDateKey = () => {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+const isValidTestQuestion = (question) => {
+  const prompt = question?.question_en || question?.question;
+  const options = question?.options_en || question?.options;
+  return typeof prompt === 'string'
+    && prompt.trim().length > 0
+    && Array.isArray(options)
+    && options.length === 4
+    && Number.isInteger(question.correctIndex)
+    && question.correctIndex >= 0
+    && question.correctIndex < options.length;
 };
 
 // --- SEO UTILS ---
@@ -312,6 +343,21 @@ const AuthGate = ({ children }) => {
 
 // --- MAIN APP ---
 export default function App() {
+  if (missingFirebaseKeys.length > 0) {
+    return (
+      <div className="min-h-screen bg-slate-950 text-slate-200 flex items-center justify-center p-6">
+        <div className="max-w-lg rounded-xl border border-red-900 bg-slate-900 p-6">
+          <h1 className="text-xl font-bold text-red-400">Firebase configuration required</h1>
+          <p className="mt-3 text-sm text-slate-300">
+            Set these Vite environment variables in your deployment settings, then rebuild:
+          </p>
+          <ul className="mt-3 list-disc pl-5 text-sm text-slate-400">
+            {missingFirebaseKeys.map(key => <li key={key}>VITE_FIREBASE_{key.replace(/[A-Z]/g, letter => `_${letter}`).toUpperCase()}</li>)}
+          </ul>
+        </div>
+      </div>
+    );
+  }
   return (
     <AuthGate>
       {(user) => <Dashboard user={user} />}
@@ -329,10 +375,11 @@ const Dashboard = ({ user }) => {
   const [activeVideo, setActiveVideo] = useState(null);
   const [activeTaskIndex, setActiveTaskIndex] = useState(null);
   const [generating, setGenerating] = useState(false);
+  const [syncError, setSyncError] = useState("");
 
   // Firestore Refs
   const userRef = doc(db, 'artifacts', appId, 'users', user.uid, 'profile', 'main');
-  const scheduleRef = doc(db, 'artifacts', appId, 'users', user.uid, 'schedules', new Date().toISOString().split('T')[0]);
+  const scheduleRef = doc(db, 'artifacts', appId, 'users', user.uid, 'schedules', getLocalDateKey());
 
   useEffect(() => {
     if (!user) return;
@@ -347,9 +394,15 @@ const Dashboard = ({ user }) => {
           streak: 0,
           totalHoursStudied: 0,
         };
-        setDoc(userRef, initData);
+        setDoc(userRef, initData).catch((err) => {
+          console.error("User profile initialization failed", err);
+          setSyncError("Could not initialize your profile. Check your Firebase permissions and connection.");
+        });
       }
-    }, (err) => console.error("User sync error", err));
+    }, (err) => {
+      console.error("User sync error", err);
+      setSyncError("Could not sync your profile. Check your Firebase connection and permissions.");
+    });
 
     const unsubSchedule = onSnapshot(scheduleRef, (docSnap) => {
       if (docSnap.exists()) {
@@ -358,7 +411,11 @@ const Dashboard = ({ user }) => {
         setTodaySchedule(null);
       }
       setLoading(false);
-    }, (err) => console.error("Schedule sync error", err));
+    }, (err) => {
+      console.error("Schedule sync error", err);
+      setLoading(false);
+      setSyncError("Could not sync today's plan. Check your Firebase connection and permissions.");
+    });
 
     return () => {
       unsubUser();
@@ -398,12 +455,17 @@ const Dashboard = ({ user }) => {
         title: "Vocabulary Builder | SSC CGL English",
         desc: "Learn high-frequency SSC CGL vocabulary with Hindi meanings and examples using AI.",
         keywords: "SSC CGL Vocabulary, English Vocab, Daily Words, Government Exam English"
+      },
+      practice: {
+        title: "Practice Mode | SSC CGL Error Detection",
+        desc: "Sharpen your grammar with difficult error detection questions. Instant feedback and explanations for SSC CGL English preparation.",
+        keywords: "SSC CGL Error Detection, English Grammar Practice, Spot the Error, SSC English"
       }
     };
 
     const current = viewMeta[view] || viewMeta.dashboard;
     document.title = `${current.title} | SSC CGL Command Center`;
-    
+
     // Structured Data for Rich Snippets (Google Search Cards)
     const jsonLd = {
       "@context": "https://schema.org",
@@ -446,26 +508,29 @@ const Dashboard = ({ user }) => {
 
       const rawText = await generateAIResponse(userPrompt, systemPrompt);
       const jsonMatch = rawText.match(/\[.*\]/s);
-      if (jsonMatch) {
-        const plan = safeJSONParse(jsonMatch[0]); 
-        if (plan) {
-            await setDoc(scheduleRef, {
-            date: new Date().toISOString(),
-            blocks: plan.map(p => ({...p, status: 'pending'})),
-            totalMinutesDone: 0,
-            targetMinutes: plan.reduce((acc, curr) => acc + curr.duration_min, 0)
-            });
-        } else {
-            alert("AI returned invalid JSON. Please try again.");
-        }
-      } else {
-        alert("AI Planning Failed. Try again.");
+      const plan = jsonMatch && safeJSONParse(jsonMatch[0]);
+      if (!Array.isArray(plan) || plan.length === 0) {
+        throw new Error("AI returned an invalid study plan. Please try again.");
       }
+      const blocks = plan.map((item) => {
+        const duration = Number(item.duration_min);
+        if (!item.title || !Number.isFinite(duration) || duration <= 0) {
+          throw new Error("AI returned a plan with an invalid task or duration. Please try again.");
+        }
+        return { ...item, duration_min: duration, completed_min: 0, status: 'pending' };
+      });
+      await setDoc(scheduleRef, {
+        date: new Date().toISOString(),
+        blocks,
+        totalMinutesDone: 0,
+        targetMinutes: blocks.reduce((total, block) => total + block.duration_min, 0)
+      });
     } catch (e) {
       console.error(e);
-      alert("Planning Error. Check console.");
+      alert(`Could not generate today's plan: ${e.message}`);
+    } finally {
+      setGenerating(false);
     }
-    setGenerating(false);
   };
 
   const renderView = () => {
@@ -476,6 +541,7 @@ const Dashboard = ({ user }) => {
       case 'test': return <TestMode user={user} activeTest={activeTest} setView={setView} userRef={userRef} />;
       case 'analysis': return <AnalysisView user={user} userData={userData} setView={setView} setActiveVideo={setActiveVideo} />;
       case 'vocabulary': return <VocabularyView user={user} setView={setView} setActiveTest={setActiveTest} />;
+      case 'practice': return <PracticeMode user={user} setView={setView} />;
       default: return <HomeView user={user} userData={userData} todaySchedule={todaySchedule} setView={setView} scheduleRef={scheduleRef} />;
     }
   };
@@ -531,6 +597,11 @@ const Dashboard = ({ user }) => {
       )}
 
       <main className={`mx-auto ${view === 'test' ? 'max-w-full h-screen' : 'max-w-md min-h-[calc(100vh-60px)]'} relative`}>
+        {syncError && view !== 'test' && (
+          <div role="alert" className="mx-4 mt-4 rounded-lg border border-red-900 bg-red-950/50 p-3 text-sm text-red-300">
+            {syncError}
+          </div>
+        )}
         {loading ? (
           <div className="p-8 text-center text-slate-500 animate-pulse">Syncing Mission Data...</div>
         ) : (
@@ -543,6 +614,7 @@ const Dashboard = ({ user }) => {
           <NavBtn icon={Target} label="Mission" active={view === 'dashboard'} onClick={() => setView('dashboard')} />
           <NavBtn icon={BookOpen} label="Library" active={view === 'library'} onClick={() => setView('library')} />
           <NavBtn icon={Zap} label="Focus" active={view === 'focus'} onClick={() => { setView('focus'); setActiveTaskIndex(null); }} />
+          <NavBtn icon={FilePenLine} label="Practice" active={view === 'practice'} onClick={() => setView('practice')} />
           <NavBtn icon={Brain} label="Analysis" active={view === 'analysis'} onClick={() => setView('analysis')} />
         </nav>
       )}
@@ -558,12 +630,16 @@ const LibraryView = ({ user, setView, setActiveTest }) => {
   const [generatingTest, setGeneratingTest] = useState(null); 
   const [aiStatus, setAiStatus] = useState("");
   const [isSaving, setIsSaving] = useState(false);
+  const [isReadingFile, setIsReadingFile] = useState(false);
   const fileInputRef = useRef(null);
 
   useEffect(() => {
     const q = query(collection(db, 'artifacts', appId, 'users', user.uid, 'materials'), orderBy('timestamp', 'desc'));
     const unsub = onSnapshot(q, (snap) => {
       setMaterials(snap.docs.map(d => ({id: d.id, ...d.data()})));
+    }, (error) => {
+      console.error("Library sync error", error);
+      alert("Could not load your study materials. Check your Firebase connection and permissions.");
     });
     return () => unsub();
   }, [user]);
@@ -575,6 +651,10 @@ const LibraryView = ({ user, setView, setActiveTest }) => {
     }
     if (newMaterial.type === 'text' && !newMaterial.content.trim()) {
       alert("Please paste text content.");
+      return;
+    }
+    if (newMaterial.type !== 'text' && !newMaterial.content.trim()) {
+      alert("Select a PDF or image and wait for its content to be read before saving.");
       return;
     }
 
@@ -595,39 +675,50 @@ const LibraryView = ({ user, setView, setActiveTest }) => {
     }
   };
 
-  const handleFileSelect = (e) => {
+  const handleFileSelect = async (e) => {
     const file = e.target.files[0];
-    if (file) {
-      setNewMaterial({
-        ...newMaterial,
-        title: file.name,
-        // We store a marker for AI to know it's a file simulation
-        content: `[FILE_UPLOADED_BY_USER: ${file.name}]\n[NOTE: This is a placeholder for a local file. Generate a test based on the TITLE and implied Topic.]`,
-        type: 'pdf'
-      });
+    if (!file) return;
+    if (file.size > 3 * 1024 * 1024) {
+      alert("Files must be 3 MB or smaller to fit the serverless request limit.");
+      e.target.value = "";
+      return;
+    }
+    const mimeType = file.type || (file.name.toLowerCase().endsWith('.pdf') ? 'application/pdf' : '');
+    if (!['application/pdf', 'image/jpeg', 'image/png', 'image/webp'].includes(mimeType)) {
+      alert("Choose a PDF, JPEG, PNG, or WebP file.");
+      e.target.value = "";
+      return;
+    }
+
+    setIsReadingFile(true);
+    setNewMaterial((current) => ({ ...current, title: file.name, content: '', type: 'pdf' }));
+    try {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      let binary = "";
+      for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+        binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
+      }
+      const prompt = `Read the attached ${mimeType === 'application/pdf' ? 'PDF' : 'image'} named "${file.name}". Extract its study content faithfully, including important facts, formulas, and headings. For scanned pages, use OCR. Return plain text only; do not invent missing or unreadable content.`;
+      const extractedContent = await generateAIResponse(
+        prompt,
+        "You extract educational material from user-provided documents. Preserve the source's meaning and structure.",
+        { mime_type: mimeType, data: btoa(binary) }
+      );
+      setNewMaterial((current) => ({ ...current, title: file.name, content: extractedContent, type: 'pdf' }));
+    } catch (error) {
+      console.error("File reading failed:", error);
+      alert(`Could not read this file: ${error.message}`);
+      setNewMaterial((current) => ({ ...current, content: '' }));
+    } finally {
+      setIsReadingFile(false);
     }
   };
 
   const handleCreateTest = async (material) => {
     setGeneratingTest(material.id);
-    setAiStatus("Scanning Document...");
-    
-    // Simulate reading time
-    await new Promise(r => setTimeout(r, 1500));
-    setAiStatus("Analyzing Key Concepts...");
-    await new Promise(r => setTimeout(r, 1500));
-    setAiStatus("Generating Question Bank...");
+    setAiStatus("Generating questions...");
 
-    const isSimulation = material.content.includes("[FILE_UPLOADED_BY_USER");
-    
-    // Smart Prompting for File Simulation
-    let contextPrompt = "";
-    if (isSimulation) {
-      contextPrompt = `The user uploaded a file named "${material.title}". Since I cannot read local files directly, assume the content matches the title. Generate a relevant, tough SSC CGL level mock test based on the topic implied by the filename "${material.title}".`;
-    } else {
-      contextPrompt = `Analyze the ENTIRE text provided below and create a comprehensive mock test. Do not limit questions to the beginning. Ensure questions cover the start, middle, and end of the content.\n\nTitle: ${material.title}\n\nFull Content:\n${material.content.substring(0, 20000)}`;
-    }
-    
+    let contextPrompt = `Analyze the study material below and create a comprehensive mock test. Cover the full material, not only its beginning.\n\nTitle: ${material.title}\n\nStudy material:\n${material.content.substring(0, 20000)}`;
     if (material.instruction) {
       contextPrompt += `\n\nIMPORTANT USER INSTRUCTION: ${material.instruction}\nFollow this instruction strictly while generating questions.`;
     }
@@ -654,11 +745,11 @@ const LibraryView = ({ user, setView, setActiveTest }) => {
       if (jsonMatch) {
         const testData = safeJSONParse(jsonMatch[0]); 
         
-        if (testData && testData.questions) {
+        if (Array.isArray(testData?.questions) && testData.questions.length > 0 && testData.questions.every(isValidTestQuestion)) {
           const formattedTest = {
             title: `Mock Test: ${material.title}`,
-            questions: testData.questions || [],
-            duration: 10 * 60, 
+            questions: testData.questions,
+            duration: testData.questions.length * 60,
           };
           setActiveTest(formattedTest);
           setView('test');
@@ -671,10 +762,11 @@ const LibraryView = ({ user, setView, setActiveTest }) => {
       }
     } catch (e) {
       console.error(e);
-      alert("AI Error during test generation.");
+      alert(`Could not generate the test: ${e.message}`);
+    } finally {
+      setGeneratingTest(null);
+      setAiStatus("");
     }
-    setGeneratingTest(null);
-    setAiStatus("");
   };
 
   return (
@@ -745,10 +837,14 @@ const LibraryView = ({ user, setView, setActiveTest }) => {
               <Upload className="w-8 h-8 text-slate-600 mx-auto mb-2 group-hover:text-emerald-500 transition-colors" />
               <p className="text-xs text-slate-500 mb-4">
                 Click to upload PDF or Photos<br/>
-                <span className="text-emerald-500/50">AI Will Analyze Topic from Filename</span>
+                <span className="text-emerald-500/50">AI will read the document contents</span>
               </p>
               
-              {!newMaterial.title ? (
+              {isReadingFile ? (
+                 <span className="text-emerald-400 text-xs flex items-center justify-center gap-2">
+                   <Loader2 className="w-3 h-3 animate-spin" /> Reading file...
+                 </span>
+              ) : !newMaterial.title ? (
                  <span className="bg-slate-800 text-slate-300 text-xs px-4 py-2 rounded">
                    Browse Files
                  </span>
@@ -771,7 +867,7 @@ const LibraryView = ({ user, setView, setActiveTest }) => {
             <button onClick={() => setIsAdding(false)} className="px-3 py-1 text-xs text-slate-400 hover:text-white">Cancel</button>
             <button 
               onClick={handleAdd} 
-              disabled={isSaving}
+              disabled={isSaving || isReadingFile}
               className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs rounded font-bold flex items-center gap-2"
             >
               {isSaving && <Loader2 className="w-3 h-3 animate-spin" />}
@@ -835,61 +931,73 @@ const TestMode = ({ user, activeTest, setView, userRef }) => {
   const [score, setScore] = useState(0);
   const [breaches, setBreaches] = useState(0);
   const [language, setLanguage] = useState('en');
+  const responsesRef = useRef(responses);
+  const breachesRef = useRef(breaches);
+  const submittedRef = useRef(false);
+  responsesRef.current = responses;
+  breachesRef.current = breaches;
+
+  const handleSubmit = useCallback(async () => {
+    if (submittedRef.current) return;
+    submittedRef.current = true;
+    setIsSubmitted(true);
+    let rawScore = 0;
+    activeTest.questions.forEach((q, idx) => {
+      if (responsesRef.current[idx] === q.correctIndex) rawScore++;
+    });
+    setScore(rawScore);
+
+    try {
+      const sessionRef = doc(collection(db, 'artifacts', appId, 'users', user.uid, 'test_results'));
+      await setDoc(sessionRef, {
+        testTitle: activeTest.title,
+        score: rawScore,
+        total: activeTest.questions.length,
+        breaches: breachesRef.current,
+        timestamp: new Date().toISOString()
+      });
+    } catch (error) {
+      console.error("Test result save failed:", error);
+      alert("Your score is shown, but the result could not be saved to history.");
+    }
+  }, [activeTest, user.uid]);
 
   useEffect(() => {
     if (isSubmitted) return;
+    if (timeLeft <= 0) {
+      handleSubmit();
+      return;
+    }
+    const timer = setTimeout(() => setTimeLeft(time => Math.max(0, time - 1)), 1000);
+    return () => clearTimeout(timer);
+  }, [timeLeft, isSubmitted, handleSubmit]);
 
-    let interval = setInterval(() => {
-      setTimeLeft(t => {
-        if (t <= 1) {
-          handleSubmit();
-          return 0;
-        }
-        return t - 1;
-      });
-    }, 1000);
-
+  useEffect(() => {
     const handleVisibilityChange = () => {
       if (document.hidden && !isSubmitted) {
-        setBreaches(prev => prev + 1);
-        updateDoc(userRef, { disciplineScore: increment(-5) });
+        breachesRef.current += 1;
+        setBreaches(breachesRef.current);
+        updateDoc(userRef, { disciplineScore: increment(-5) }).catch((error) => {
+          console.error("Discipline penalty update failed:", error);
+          alert("The discipline penalty could not be saved. Check your connection.");
+        });
         alert("WARNING: Test Discipline Breach! -5 Score.");
       }
     };
 
     document.addEventListener("visibilitychange", handleVisibilityChange);
-
-    return () => {
-      clearInterval(interval);
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
-    };
+    return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
   }, [isSubmitted, userRef]);
 
-  if (!activeTest) return <div className="p-8">Error loading test.</div>;
+  if (!Array.isArray(activeTest?.questions) || activeTest.questions.length === 0) {
+    return <div className="p-8">Error loading test. Return to the Library and generate it again.</div>;
+  }
 
   const currentQ = activeTest.questions[currentQIndex];
 
   const handleOptionSelect = (optIndex) => {
     if (isSubmitted) return;
     setResponses(prev => ({ ...prev, [currentQIndex]: optIndex }));
-  };
-
-  const handleSubmit = () => {
-    setIsSubmitted(true);
-    let rawScore = 0;
-    activeTest.questions.forEach((q, idx) => {
-      if (responses[idx] === q.correctIndex) rawScore++;
-    });
-    setScore(rawScore);
-    
-    const sessionRef = doc(collection(db, 'artifacts', appId, 'users', user.uid, 'test_results'));
-    setDoc(sessionRef, {
-      testTitle: activeTest.title,
-      score: rawScore,
-      total: activeTest.questions.length,
-      breaches: breaches,
-      timestamp: new Date().toISOString()
-    });
   };
 
   const formatTime = (seconds) => {
@@ -1019,7 +1127,6 @@ const TestMode = ({ user, activeTest, setView, userRef }) => {
               <div className="mb-6 flex items-start gap-4">
                 <span className="text-slate-500 font-bold text-lg">Q{currentQIndex + 1}.</span>
                 <p className="text-lg text-slate-200 leading-relaxed font-medium">
-                  {currentQ.question}
                   {getQuestionText(currentQ)}
                 </p>
               </div>
@@ -1245,6 +1352,7 @@ const FocusMode = ({ user, scheduleRef, todaySchedule, setView, userData, userRe
   const [youtubeLink, setYoutubeLink] = useState(activeVideo?.url || "");
   const [embeddedVideo, setEmbeddedVideo] = useState(activeVideo?.id || null);
   const playerRef = useRef(null);
+  const finishingRef = useRef(false);
 
   // Reset timer when task changes
   useEffect(() => {
@@ -1318,7 +1426,10 @@ const FocusMode = ({ user, scheduleRef, todaySchedule, setView, userData, userRe
       if (document.hidden && isActive) {
         setIsActive(false); 
         setBreaches(prev => prev + 1);
-        updateDoc(userRef, { disciplineScore: increment(-2) });
+        updateDoc(userRef, { disciplineScore: increment(-2) }).catch((error) => {
+          console.error("Focus discipline penalty update failed:", error);
+          alert("The discipline penalty could not be saved. Check your connection.");
+        });
       }
     };
     document.addEventListener("visibilitychange", handleVisibilityChange);
@@ -1352,68 +1463,68 @@ const FocusMode = ({ user, scheduleRef, todaySchedule, setView, userData, userRe
   };
 
   const completeSession = async () => {
-    if (!currentTask) return;
-    
-    // Calculate actual time spent (in case of early finish)
-    // Use initialDuration to ensure accurate tracking for dynamic video lengths
-    const spentSeconds = initialDuration - timeLeft;
-    const spentMinutes = Math.max(1, Math.floor(spentSeconds / 60));
+    if (!currentTask || finishingRef.current) return;
+    finishingRef.current = true;
 
-    // SAFETY CHECK: Ensure video ID is captured even if state was slightly off
-    let finalVideoId = embeddedVideo;
-    if (!finalVideoId && youtubeLink) {
-        finalVideoId = getYoutubeId(youtubeLink);
-    }
+    try {
+      const spentSeconds = initialDuration - timeLeft;
+      const spentMinutes = Math.max(1, Math.floor(spentSeconds / 60));
 
-    // 1. Update User Global Stats (Total Hours & Discipline)
-    const userUpdates = {
-      totalHoursStudied: increment(spentMinutes / 60)
-    };
-    
-    // PENALTY CHECK: If user quits with significant time left (> 1 min)
-    if (timeLeft > 60) {
-      userUpdates.disciplineScore = increment(-5); // Penalty for early exit
-      alert("⚠️ DISCIPLINE PENALTY: Session abandoned early! (-5 Points)");
-    } else if (breaches === 0) {
-      userUpdates.disciplineScore = increment(1);
-    }
-    await updateDoc(userRef, userUpdates);
-
-    // 2. Update Daily Schedule (if exists)
-    if (todaySchedule) {
-      const scheduleUpdates = { totalMinutesDone: increment(spentMinutes) };
-      
-      // Only update block status if it's a Scheduled Task (not Custom/AdHoc)
-      if (!currentTask.isAdHoc && activeTaskIndex !== null) {
-        const newBlocks = [...blocks];
-        const block = newBlocks[activeTaskIndex];
-        
-        // Accumulate time
-        const previousDone = block.completed_min || 0;
-        const newDone = previousDone + spentMinutes;
-        block.completed_min = newDone;
-
-        // Only mark completed if actual time spent >= target duration
-        if (newDone >= block.duration_min) {
-          block.status = 'completed';
-        }
-        
-        scheduleUpdates.blocks = newBlocks;
+      let finalVideoId = embeddedVideo;
+      if (!finalVideoId && youtubeLink) {
+          finalVideoId = getYoutubeId(youtubeLink);
       }
-      await updateDoc(scheduleRef, scheduleUpdates);
+
+      const userUpdates = {
+        totalHoursStudied: increment(spentMinutes / 60)
+      };
+    
+      if (timeLeft > 60) {
+        userUpdates.disciplineScore = increment(-5);
+        alert("⚠️ DISCIPLINE PENALTY: Session abandoned early! (-5 Points)");
+      } else if (breaches === 0) {
+        userUpdates.disciplineScore = increment(1);
+      }
+
+      const batch = writeBatch(db);
+      batch.update(userRef, userUpdates);
+
+      if (todaySchedule) {
+        const scheduleUpdates = { totalMinutesDone: increment(spentMinutes) };
+      
+        if (!currentTask.isAdHoc && activeTaskIndex !== null) {
+          const newBlocks = [...blocks];
+          const block = newBlocks[activeTaskIndex];
+        
+          const previousDone = block.completed_min || 0;
+          const newDone = previousDone + spentMinutes;
+          block.completed_min = newDone;
+
+          if (newDone >= block.duration_min) {
+            block.status = 'completed';
+          }
+          scheduleUpdates.blocks = newBlocks;
+        }
+        batch.update(scheduleRef, scheduleUpdates);
+      }
+      const sessionRef = doc(collection(db, 'artifacts', appId, 'users', user.uid, 'sessions'));
+      batch.set(sessionRef, {
+        task: currentTask.title,
+        duration: spentMinutes,
+        breaches,
+        timestamp: new Date().toISOString(),
+        type: currentTask.type,
+        videoId: finalVideoId || null,
+        videoUrl: youtubeLink || null
+      });
+      await batch.commit();
+      if (setActiveVideo) setActiveVideo(null);
+      setView('dashboard');
+    } catch (error) {
+      finishingRef.current = false;
+      console.error("Focus session save failed:", error);
+      alert(`Could not save your focus session: ${error.message}`);
     }
-    const sessionRef = doc(collection(db, 'artifacts', appId, 'users', user.uid, 'sessions'));
-    await setDoc(sessionRef, {
-      task: currentTask.title,
-      duration: spentMinutes,
-      breaches: breaches,
-      timestamp: new Date().toISOString(),
-      type: currentTask.type,
-      videoId: finalVideoId || null,
-      videoUrl: youtubeLink || null 
-    });
-    if (setActiveVideo) setActiveVideo(null);
-    setView('dashboard');
   };
 
   // If no schedule and not custom mode, force custom mode
@@ -1628,6 +1739,214 @@ const FocusMode = ({ user, scheduleRef, todaySchedule, setView, userData, userRe
   );
 };
 
+// --- VIEW: PRACTICE MODE ---
+const PracticeMode = ({ user, setView }) => {
+  const [question, setQuestion] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [userSelection, setUserSelection] = useState({ index: null, status: '' }); // status: 'correct', 'incorrect'
+  const [showAnswer, setShowAnswer] = useState(false);
+  const [timeLeft, setTimeLeft] = useState(10);
+  const [timerId, setTimerId] = useState(null);
+  const [explanationLang, setExplanationLang] = useState('en'); // 'en' or 'hi'
+
+  const fetchQuestion = async () => {
+    setLoading(true);
+    setQuestion(null);
+    setUserSelection({ index: null, status: '' });
+    setShowAnswer(false);
+    if (timerId) clearInterval(timerId);
+
+    const systemPrompt = `You are an expert English Grammar teacher for the SSC CGL exam, specializing in Previous Year Questions (PYQs).
+    Your task is to generate a single "Error Detection" question that is either an actual PYQ from an SSC exam (like CGL, CHSL, CPO) or is created in the exact style and difficulty of a real PYQ.
+    The sentence must be split into three parts. The fourth option is always "No Error".
+    You must return a JSON object with the following structure:
+    {
+      "sentence": "The full sentence with parts separated by slashes, like 'Part 1 / Part 2 / Part 3.'",
+      "parts": ["Part 1 of the sentence", "Part 2", "Part 3"],
+      "errorIndex": 1, // The index (0-2) of the part containing the error. If no error, this should be 3.
+      "explanation_en": "A clear English explanation of the grammatical error and the correction, mentioning the grammatical rule involved.",
+      "explanation_hi": "The same explanation, but translated into clear, natural-sounding Hindi."
+    }
+    IMPORTANT: Return ONLY the raw JSON object. Do not wrap it in markdown or any other text.
+    If there is no error in the sentence, the "errorIndex" must be 3.
+    `;
+
+    try {
+      const rawText = await generateAIResponse("Generate a new SSC CGL previous year error detection question with Hindi explanation.", systemPrompt);
+      const q = safeJSONParse(rawText);
+      if (q && q.sentence && q.parts && q.parts.length === 3 && q.hasOwnProperty('errorIndex') && q.explanation_en && q.explanation_hi) {
+        setQuestion(q);
+        setTimeLeft(10); // Reset timer
+      } else {
+        console.error("AI returned invalid question format", rawText);
+        alert("AI returned an invalid question format. Please try again.");
+      }
+    } catch (e) {
+      console.error("Error fetching question:", e);
+      alert("An error occurred while fetching the question.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Effect to start the timer when a new question is loaded
+  useEffect(() => {
+    if (question && !showAnswer && userSelection.index === null) {
+      const id = setInterval(() => {
+        setTimeLeft(prev => {
+          if (prev <= 1) {
+            clearInterval(id);
+            setShowAnswer(true); // Time's up, show the answer
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+      setTimerId(id);
+
+      return () => clearInterval(id);
+    }
+  }, [question, showAnswer, userSelection.index]);
+
+  const handlePartSelect = (index) => {
+    if (showAnswer || userSelection.index !== null) return; // Don't allow changes after selection or reveal
+
+    clearInterval(timerId); // Stop the timer
+
+    if (index === question.errorIndex) {
+      setUserSelection({ index, status: 'correct' });
+      // Automatically fetch next question after a short delay
+      setTimeout(fetchQuestion, 1500);
+    } else {
+      setUserSelection({ index, status: 'incorrect' });
+      setShowAnswer(true); // Show the correct answer because the user was wrong
+    }
+  };
+
+  const getPartClassName = (index) => {
+    let base = "w-full text-left p-4 rounded-xl border transition-all flex items-center gap-3 text-slate-300 ";
+
+    if (!showAnswer && userSelection.index === null) {
+      return base + "bg-slate-900 border-slate-800 hover:border-slate-600";
+    }
+
+    const isCorrectAnswer = index === question.errorIndex;
+    const isSelected = index === userSelection.index;
+
+    if (isCorrectAnswer) {
+      return base + "bg-emerald-900/30 border-emerald-500 ring-1 ring-emerald-500";
+    }
+    if (isSelected && !isCorrectAnswer) {
+      return base + "bg-red-900/30 border-red-500";
+    }
+
+    return base + "bg-slate-900 border-slate-800 opacity-60";
+  };
+
+  const speakExplanation = () => {
+    if (!question) return;
+    const text = explanationLang === 'en' ? question.explanation_en : question.explanation_hi;
+    if (!text) return;
+
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = explanationLang === 'en' ? 'en-IN' : 'hi-IN';
+    window.speechSynthesis.speak(utterance);
+  };
+
+  return (
+    <div className="p-4 space-y-6 pb-24">
+      <div className="flex items-center justify-between">
+        <h2 className="text-xl font-bold flex items-center gap-2">
+          <FilePenLine className="w-5 h-5 text-emerald-500" />
+          Error Detection Practice
+        </h2>
+      </div>
+
+      {!question && !loading && (
+        <div className="text-center py-16 space-y-4">
+          <p className="text-slate-400">Press the button to start practicing error detection questions.</p>
+          <button
+            onClick={fetchQuestion}
+            className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 px-6 rounded-lg"
+          >
+            Start Practice
+          </button>
+        </div>
+      )}
+
+      {loading && (
+        <div className="flex flex-col items-center justify-center py-16 space-y-3">
+          <Loader2 className="w-8 h-8 text-emerald-500 animate-spin" />
+          <p className="text-emerald-500 animate-pulse">Generating a tough question...</p>
+        </div>
+      )}
+
+      {question && (
+        <div className="space-y-4">
+          <div className="flex justify-between items-center">
+            <p className="text-xs text-slate-500 font-mono">Identify the segment with the error:</p>
+            <div className={`text-lg font-mono font-bold px-3 py-1 rounded ${timeLeft > 3 ? 'text-slate-400' : 'text-red-500 animate-pulse'}`}>
+              00:{timeLeft.toString().padStart(2, '0')}
+            </div>
+          </div>
+
+          <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl text-lg leading-relaxed text-slate-300">
+            {question.sentence}
+          </div>
+
+          <div className="space-y-3 pt-2">
+            {question.parts.map((part, index) => (
+              <button key={index} onClick={() => handlePartSelect(index)} className={getPartClassName(index)}>
+                <span className="font-mono text-xs text-slate-500">({String.fromCharCode(65 + index)})</span>
+                <span>{part}</span>
+              </button>
+            ))}
+            <button onClick={() => handlePartSelect(3)} className={getPartClassName(3)}>
+              <span className="font-mono text-xs text-slate-500">(D)</span>
+              <span>No Error</span>
+            </button>
+          </div>
+
+          {showAnswer && (
+            <div className="bg-slate-950 p-4 rounded-lg border border-slate-800 relative overflow-hidden mt-6 animate-in fade-in">
+              <div className="absolute top-0 left-0 w-1 h-full bg-emerald-500"></div>
+              <div className="flex justify-between items-center mb-2">
+                <div className="flex items-center gap-2">
+                  <p className="text-[10px] font-bold text-emerald-500 uppercase tracking-widest">
+                    Explanation
+                  </p>
+                  <div className="flex bg-slate-900 rounded-md p-0.5 border border-slate-800">
+                    <button onClick={() => setExplanationLang('en')} className={`px-2 py-0.5 text-[10px] rounded-sm transition-colors ${explanationLang === 'en' ? 'bg-slate-700 text-white' : 'text-slate-400'}`}>EN</button>
+                    <button onClick={() => setExplanationLang('hi')} className={`px-2 py-0.5 text-[10px] rounded-sm transition-colors ${explanationLang === 'hi' ? 'bg-slate-700 text-white' : 'text-slate-400'}`}>HI</button>
+                  </div>
+                </div>
+                <button onClick={speakExplanation} className="text-slate-400 hover:text-white transition-colors flex items-center gap-1 text-xs">
+                  <Volume2 size={14} />
+                  <span>Listen</span>
+                </button>
+              </div>
+              <p className="text-sm text-slate-300 leading-relaxed whitespace-pre-wrap">
+                {explanationLang === 'en' ? question.explanation_en : question.explanation_hi}
+              </p>
+            </div>
+          )}
+
+          <div className="pt-4">
+            <button
+              onClick={fetchQuestion}
+              className="w-full bg-slate-800 hover:bg-slate-700 text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2"
+            >
+              <RefreshCw className="w-4 h-4" />
+              Next Question
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
 // --- VIEW: VOCABULARY BUILDER ---
 const VocabularyView = ({ user, setView, setActiveTest }) => {
   const [currentVocab, setCurrentVocab] = useState([]);
@@ -1638,7 +1957,15 @@ const VocabularyView = ({ user, setView, setActiveTest }) => {
   useEffect(() => {
     const savedHistory = localStorage.getItem(`vocab_history_${user.uid}`);
     if (savedHistory) {
-      setHistory(JSON.parse(savedHistory));
+      try {
+        const words = JSON.parse(savedHistory);
+        if (!Array.isArray(words)) throw new Error("Saved vocabulary history is not a list.");
+        setHistory(words);
+      } catch (error) {
+        console.error("Could not read saved vocabulary history:", error);
+        alert("Saved vocabulary history could not be read. You can continue with a new word list.");
+        setHistory([]);
+      }
     }
   }, [user]);
 
@@ -1657,30 +1984,29 @@ const VocabularyView = ({ user, setView, setActiveTest }) => {
     try {
       const rawText = await generateAIResponse("Give me 20 new words.", systemPrompt);
       const jsonMatch = rawText.match(/\[.*\]/s);
-      if (jsonMatch) {
-        const newWords = safeJSONParse(jsonMatch[0]);
-        if (newWords && Array.isArray(newWords)) {
-          setCurrentVocab(newWords);
-          
-          // Update History
-          const updatedHistory = [...newWords, ...history];
-          // Remove duplicates based on 'word'
-          const uniqueHistory = updatedHistory.filter((v,i,a)=>a.findIndex(t=>(t.word.toLowerCase() === v.word.toLowerCase()))===i);
-          
-          setHistory(uniqueHistory);
-          localStorage.setItem(`vocab_history_${user.uid}`, JSON.stringify(uniqueHistory));
-        }
+      const newWords = jsonMatch && safeJSONParse(jsonMatch[0]);
+      if (!Array.isArray(newWords) || newWords.length === 0 || newWords.some(word => !word.word || !word.hindi || !word.meaning)) {
+        throw new Error("AI returned an invalid vocabulary list. Please try again.");
       }
+      setCurrentVocab(newWords);
+      const updatedHistory = [...newWords, ...history];
+      const uniqueHistory = updatedHistory.filter((word, index, words) =>
+        words.findIndex(item => item.word.toLowerCase() === word.word.toLowerCase()) === index
+      );
+      setHistory(uniqueHistory);
+      localStorage.setItem(`vocab_history_${user.uid}`, JSON.stringify(uniqueHistory));
     } catch (error) {
       console.error("Vocab Error:", error);
-      alert("Failed to fetch words. Try again.");
+      alert(`Could not fetch vocabulary: ${error.message}`);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   const speak = (text) => {
     window.speechSynthesis.cancel();
     const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = 'en-IN';
     window.speechSynthesis.speak(utterance);
   };
 
@@ -1709,22 +2035,22 @@ const VocabularyView = ({ user, setView, setActiveTest }) => {
     try {
       const rawText = await generateAIResponse(`Words: ${wordList}`, systemPrompt);
       const jsonMatch = rawText.match(/\{.*\}/s);
-      if (jsonMatch) {
-        const data = safeJSONParse(jsonMatch[0]);
-        if (data && data.questions) {
-          setActiveTest({
-            title: `Vocab Revision: ${qCount} Words`,
-            questions: data.questions,
-            duration: Math.max(300, qCount * 60) // 1 min per question or min 5 mins
-          });
-          setView('test');
-        }
+      const data = jsonMatch && safeJSONParse(jsonMatch[0]);
+      if (!Array.isArray(data?.questions) || data.questions.length === 0 || !data.questions.every(isValidTestQuestion)) {
+        throw new Error("AI returned an invalid revision test. Please try again.");
       }
+      setActiveTest({
+        title: `Vocab Revision: ${qCount} Words`,
+        questions: data.questions,
+        duration: Math.max(300, qCount * 60)
+      });
+      setView('test');
     } catch (e) {
       console.error(e);
-      alert("Failed to generate test.");
+      alert(`Could not generate the vocabulary test: ${e.message}`);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   return (
@@ -1830,21 +2156,30 @@ const AnalysisView = ({ user, userData, setView, setActiveVideo }) => {
     );
     const unsub = onSnapshot(q, (snap) => {
       setHistory(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    }, (error) => {
+      console.error("Session history sync error", error);
+      alert("Could not load session history. Check your Firebase connection and permissions.");
     });
     return () => unsub();
   }, [user]);
 
   const runDeepAnalysis = async () => {
     setLoading(true);
-    const contextData = {
-      currentDiscipline: userData?.disciplineScore,
-      targetHours: 7,
-      weakAreas: userData?.weakSubjects,
-    };
-    const systemPrompt = `You are "The Sergeant", a strict AI analyst. Analyze: ${JSON.stringify(contextData)}. Be brutal but encouraging.`;
-    const result = await generateAIResponse("Analyze my performance.", systemPrompt);
-    setAnalysis(result);
-    setLoading(false);
+    try {
+      const contextData = {
+        currentDiscipline: userData?.disciplineScore,
+        targetHours: 7,
+        weakAreas: userData?.weakSubjects,
+        recentSessions: history.map(({ task, duration, breaches, type }) => ({ task, duration, breaches, type })),
+      };
+      const systemPrompt = `You are "The Sergeant", a strict AI analyst. Analyze this study data: ${JSON.stringify(contextData)}. Give practical, specific feedback. Be direct but encouraging.`;
+      setAnalysis(await generateAIResponse("Analyze my performance.", systemPrompt));
+    } catch (error) {
+      console.error("Performance analysis failed:", error);
+      alert(`Could not analyze your performance: ${error.message}`);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleRewatch = (session) => {
@@ -1854,7 +2189,12 @@ const AnalysisView = ({ user, userData, setView, setActiveVideo }) => {
 
   const handleDelete = async (sessionId) => {
     if (window.confirm("Are you sure you want to delete this history record?")) {
-      await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'sessions', sessionId));
+      try {
+        await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'sessions', sessionId));
+      } catch (error) {
+        console.error("Session history deletion failed:", error);
+        alert("Could not delete this session. Check your connection and permissions.");
+      }
     }
   };
 
@@ -1940,7 +2280,7 @@ const AnalysisView = ({ user, userData, setView, setActiveVideo }) => {
 const StatCard = ({ label, value, sub, color }) => (
   <div className="bg-slate-900 p-3 rounded-lg border border-slate-800">
     <p className="text-slate-500 text-[10px] uppercase font-bold">{label}</p>
-    <p className={`text-xl font-bold text-${color}-500 mt-1`}>{value}</p>
+    <p className={`text-xl font-bold ${color === 'emerald' ? 'text-emerald-500' : 'text-blue-500'} mt-1`}>{value}</p>
     <p className="text-slate-600 text-[10px] mt-1">{sub}</p>
   </div>
 );
